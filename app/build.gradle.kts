@@ -45,6 +45,7 @@ dependencies {
     androidTestImplementation(libs.espresso.core)
     androidTestImplementation(libs.ext.junit)
     implementation(libs.coil)
+    implementation(libs.coil.network)
 }
 
 configurations.all {

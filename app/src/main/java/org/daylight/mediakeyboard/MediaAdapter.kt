@@ -1,11 +1,14 @@
 package org.daylight.mediakeyboard
 
+import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.ImageView
 import androidx.recyclerview.widget.RecyclerView
-import coil3.load // Предполагаем, что вы добавите Coil для загрузки картинок
+import coil3.load
+import coil3.request.error
+import coil3.request.placeholder
 
 class MediaAdapter(
     private val items: List<MediaItem>,
@@ -35,8 +38,14 @@ class MediaAdapter(
 
         // 2. Загружаем картинку (используем Coil как пример)
         // В реальном приложении здесь будет загрузка по item.previewUrl или item.url
-        holder.thumb.load(item.url) {
-            // Можно добавить placeholder и error
+        holder.thumb.load(item.previewUrl ?: item.url) {
+            placeholder(R.drawable.ic_placeholder)
+            error(R.drawable.ic_error)
+            listener(
+                onError = { _, result ->
+                    Log.e("Coil", "load failed: ${item.url} -> ${result.throwable.message}")
+                }
+            )
         }
 
         // 3. Клик

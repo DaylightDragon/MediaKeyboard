@@ -18,7 +18,7 @@ class MediaKeyboardService : InputMethodService() {
     // Теперь у нас есть список ссылок. Соотношение сторон пока поставим заглушкой.
     // В реальном приложении вы будете получать его при загрузке.
     private val demoItems = listOf(
-        MediaItem("https://klipy.com/gifs/cat-hitting-blanket", aspectRatio = 1.2f),
+        MediaItem("https://klipy.com/gifs/cat-hitting-blanket", "https://klipy.com/gifs/cat-hitting-blanket/player", aspectRatio = 1.2f),
         MediaItem("https://klipy.com/gifs/cat-wiggle-15", aspectRatio = 0.8f),
         MediaItem("https://klipy.com/gifs/cat-cat-crazy-2", aspectRatio = 1.5f),
         MediaItem("https://klipy.com/gifs/cat-tuxedo-2", aspectRatio = 1.0f),
