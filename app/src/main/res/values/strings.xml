@@ -1,0 +1,9 @@
+<resources>
+    <string name="app_name">Media Keyboard</string>
+    <string name="ime_label">Media Keyboard</string>
+    <string name="settings_label">Media Keyboard Settings</string>
+    <string name="subtype_generic">Media</string>
+    <string name="btn_enable_ime">Включить клавиатуру в настройках</string>
+    <string name="btn_pick_ime">Выбрать текущую клавиатуру</string>
+    <string name="btn_open_settings">Настройки медиа-клавиатуры</string>
+</resources>
