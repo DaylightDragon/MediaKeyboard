@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    android:layout_width="match_parent"
-    android:layout_height="80dp"
-    android:padding="4dp">
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:padding="2dp"> <!-- Небольшой отступ между плитками -->
 
     <ImageView
         android:id="@+id/thumb"
@@ -11,16 +11,4 @@
         android:scaleType="centerCrop"
         android:background="#FF333333"
         android:contentDescription="@null" />
-
-    <TextView
-        android:id="@+id/title"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_gravity="bottom"
-        android:background="#80000000"
-        android:padding="2dp"
-        android:textColor="#FFFFFFFF"
-        android:textSize="10sp"
-        android:maxLines="1"
-        android:ellipsize="end" />
 </FrameLayout>

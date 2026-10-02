@@ -1,5 +1,7 @@
 [versions]
 agp = "9.4.1"
+kotlin = "2.2.0"
+coil = "3.6.3"
 junit = "4.13.2"
 junitVersion = "1.1.5"
 espressoCore = "3.5.1"
@@ -9,6 +11,8 @@ activityKtx = "1.8.0"
 constraintlayout = "2.1.4"
 
 [libraries]
+kotlin-bom = { group = "org.jetbrains.kotlin", name = "kotlin-bom", version.ref = "kotlin" }
+coil = { module = "io.coil-kt.coil3:coil", version.ref = "coil" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 ext-junit = { group = "androidx.test.ext", name = "junit", version.ref = "junitVersion" }
 espresso-core = { group = "androidx.test.espresso", name = "espresso-core", version.ref = "espressoCore" }
