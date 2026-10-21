@@ -1,5 +1,6 @@
 package org.daylight.mediakeyboard
 
+import android.graphics.drawable.Animatable
 import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
@@ -8,7 +9,10 @@ import android.widget.ImageView
 import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
 import androidx.recyclerview.widget.StaggeredGridLayoutManager
+import androidx.vectordrawable.graphics.drawable.Animatable2Compat
+import coil3.gif.onAnimationStart
 import coil3.load
+import coil3.request.allowHardware
 import coil3.request.error
 import coil3.request.placeholder
 import org.daylight.mediakeyboard.data.MediaResolution
@@ -50,11 +54,25 @@ class MediaAdapter(
 
         when (res) {
             is MediaResolution.Ready -> {
-                Log.d("Adapter", "  -> Ready, load ${res.previewUrl}")
+                Log.d("Adapter", "  -> Ready, load ${res.contentUrl}")
                 holder.overlay.visibility = View.GONE
-                holder.thumb.load(res.previewUrl) {
+                holder.thumb.load(res.contentUrl) {
                     placeholder(R.drawable.ic_placeholder)
                     error(R.drawable.ic_error)
+                    onAnimationStart {
+                        Log.d("MediaKeyboard", "Animation Started")
+                    }
+                    listener(
+                        onSuccess = { _, result ->
+                            // Принудительно запускаем анимацию
+                            val drawable = result.image
+                            if (drawable is Animatable2Compat) {
+                                drawable.start()
+                            } else if (drawable is Animatable) {
+                                drawable.start()
+                            }
+                        }
+                    )
                 }
             }
             is MediaResolution.MissingKey -> {

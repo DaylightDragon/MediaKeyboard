@@ -28,7 +28,7 @@ class ApiKeyStore private constructor(context: Context) {
         prefs.edit().apply {
             if (value.isNullOrBlank()) remove(key(serviceId))
             else putString(key(serviceId), tink.encrypt(value))
-        }.apply()
+        }.commit()
     }
 
     private fun key(serviceId: String) = "api_key_$serviceId"

@@ -72,7 +72,9 @@ class MediaKeyboardService : InputMethodService() {
     private fun onTileClick(entry: MediaEntry) {
         val res = entry.resolution
         if (res is MediaResolution.Ready) {
-            insertText(res.contentUrl)
+            insertText(res.sourceUrl)
+            Log.d(TAG, "Content URL: " + res.contentUrl)
+            Log.d(TAG, "PreviewUrl URL: " + res.previewUrl)
         } else {
             // Подсказка пользователю — можно через Toast, но в IME он не всегда виден.
             // Лучше — визуально в плитке (уже сделано оверлеем).
@@ -97,6 +99,21 @@ class MediaKeyboardService : InputMethodService() {
 //        "https://cdn.discordapp.com/attachments/1054140785731309669/1444342699426713681/dragon-cute-paws.gif",
 //        "https://media.discordapp.net/attachments/1023212236921118811/1333008904371699743/attachment.gif",
     )
+
+    override fun onStartInputView(editorInfo: EditorInfo?, restarting: Boolean) {
+        super.onStartInputView(editorInfo, restarting)
+
+        // Перерезолвить всё, что было MissingKey (ключ мог появиться)
+        entries.forEachIndexed { index, entry ->
+            if (entry.resolution is MediaResolution.MissingKey) {
+                scope.launch {
+                    val res = repository.resolve(entry.sourceUrl, forceReload = true)
+                    entries[index] = entry.copy(resolution = res)
+                    adapter.notifyItemChanged(index)
+                }
+            }
+        }
+    }
 
     private fun insertText(text: String) {
         val ic = currentInputConnection ?: return

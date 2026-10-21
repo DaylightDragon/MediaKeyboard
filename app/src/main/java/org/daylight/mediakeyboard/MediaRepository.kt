@@ -14,18 +14,21 @@ class MediaRepository(
      * Возвращает ResolvedMedia для отображения/вставки.
      * Никогда не бросает: ошибки возвращает как FailedMedia.
      */
-    suspend fun resolve(sourceUrl: String): MediaResolution {
-        val cached = dao.get(sourceUrl)
-        if (cached != null) {
-            return if (cached.failed) {
-                MediaResolution.Failed(cached.serviceId ?: "unknown", cached.failReason)
-            } else {
-                MediaResolution.Ready(
-                    previewUrl = cached.previewUrl,
-                    contentUrl = cached.contentUrl,
-                    aspectRatio = cached.aspectRatio,
-                    title = cached.title
-                )
+    suspend fun resolve(sourceUrl: String, forceReload: Boolean = false): MediaResolution {
+        if (!forceReload) {
+            val cached = dao.get(sourceUrl)
+            if (cached != null) {
+                return if (cached.failed) {
+                    MediaResolution.Failed(cached.serviceId ?: "unknown", cached.failReason)
+                } else {
+                    MediaResolution.Ready(
+                        sourceUrl = sourceUrl,
+                        previewUrl = cached.previewUrl,
+                        contentUrl = cached.contentUrl,
+                        aspectRatio = cached.aspectRatio,
+                        title = cached.title
+                    )
+                }
             }
         }
 
@@ -45,7 +48,7 @@ class MediaRepository(
                     failed = false
                 )
             )
-            return MediaResolution.Ready(sourceUrl, sourceUrl, 1f, null)
+            return MediaResolution.Ready(sourceUrl, sourceUrl, sourceUrl, 1f, null)
         }
 
         val ref = resolver.extractRef(sourceUrl)
@@ -68,7 +71,7 @@ class MediaRepository(
                 )
             )
             MediaResolution.Ready(
-                resolved.previewUrl, resolved.contentUrl,
+                sourceUrl, resolved.previewUrl, resolved.contentUrl,
                 resolved.aspectRatio, resolved.title
             )
         } catch (e: MissingApiKeyException) {
@@ -96,6 +99,7 @@ class MediaRepository(
 
 sealed class MediaResolution {
     data class Ready(
+        val sourceUrl: String,
         val previewUrl: String,
         val contentUrl: String,
         val aspectRatio: Float,

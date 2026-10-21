@@ -1,0 +1,2 @@
+-keep class coil3.gif.** { *; }
+-keep class * implements coil3.util.DecoderServiceLoaderTarget { *; }
