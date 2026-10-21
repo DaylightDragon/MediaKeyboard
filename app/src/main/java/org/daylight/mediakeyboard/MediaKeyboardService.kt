@@ -3,77 +3,103 @@ package org.daylight.mediakeyboard
 import android.inputmethodservice.InputMethodService
 import android.util.Log
 import android.view.View
+import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
 import androidx.recyclerview.widget.RecyclerView
 import androidx.recyclerview.widget.StaggeredGridLayoutManager
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
+import org.daylight.mediakeyboard.data.ApiKeyStore
+import org.daylight.mediakeyboard.data.AppDatabase
+import org.daylight.mediakeyboard.data.MediaRepository
+import org.daylight.mediakeyboard.data.MediaResolution
+import org.daylight.mediakeyboard.data.ResolverRegistry
 
 class MediaKeyboardService : InputMethodService() {
+    public final val TAG = "MediaKeyboard";
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private lateinit var repository: MediaRepository
+    private lateinit var adapter: MediaAdapter
+    private val entries = mutableListOf<MediaEntry>()
 
-    companion object {
-        private const val TAG = "MediaKB"
-        private const val MIN_COLUMNS = 2
-        private const val TARGET_TILE_WIDTH_DP = 100 // Желаемая ширина плитки
+    override fun onCreate() {
+        super.onCreate()
+        val registry = ResolverRegistry.createDefault()
+        repository = MediaRepository(
+            dao = AppDatabase.get(this).mediaDao(),
+            registry = registry,
+            apiKeyStore = ApiKeyStore.get(this)
+        )
     }
 
-    // Теперь у нас есть список ссылок. Соотношение сторон пока поставим заглушкой.
-    // В реальном приложении вы будете получать его при загрузке.
-    private val demoItems = listOf(
-        MediaItem("https://klipy.com/gifs/cat-hitting-blanket", "https://klipy.com/gifs/cat-hitting-blanket/player", aspectRatio = 1.2f),
-        MediaItem("https://klipy.com/gifs/cat-wiggle-15", aspectRatio = 0.8f),
-        MediaItem("https://klipy.com/gifs/cat-cat-crazy-2", aspectRatio = 1.5f),
-        MediaItem("https://klipy.com/gifs/cat-tuxedo-2", aspectRatio = 1.0f),
-        MediaItem("https://klipy.com/gifs/sergal-4", aspectRatio = 0.9f),
-        MediaItem("https://klipy.com/gifs/cat-sniff-7CA", aspectRatio = 1.1f),
-        MediaItem("https://klipy.com/gifs/cat-kitty-OzS", aspectRatio = 0.7f),
-        MediaItem("https://klipy.com/gifs/stewly-blume-17", aspectRatio = 1.3f),
-        MediaItem("https://klipy.com/gifs/brain-damage-cat", aspectRatio = 1.0f),
-        // Discord ссылки (в реальном приложении они могут не работать из-за авторизации)
-        MediaItem("https://cdn.discordapp.com/attachments/1054140785731309669/1444342699426713681/dragon-cute-paws.gif", aspectRatio = 1.0f),
-        MediaItem("https://media.discordapp.net/attachments/1023212236921118811/1333008904371699743/attachment.gif", aspectRatio = 1.0f),
-    )
-
     override fun onCreateInputView(): View {
-        Log.d(TAG, "onCreateInputView called")
         val view = layoutInflater.inflate(R.layout.keyboard_view, null)
-
         val grid = view.findViewById<RecyclerView>(R.id.mediaGrid)
 
-        // --- Расчет количества столбцов и ширины плитки ---
-        val displayMetrics = resources.displayMetrics
-        val screenWidthDp = displayMetrics.widthPixels / displayMetrics.density
-        val targetWidthPx = (TARGET_TILE_WIDTH_DP * displayMetrics.density).toInt()
+        val dm = resources.displayMetrics
+        Log.d(TAG, "displayMetrics.widthPixels=${dm.widthPixels}, density=${dm.density}")
+        val targetPx = (100 * dm.density).toInt()
+        val columns = maxOf(2, dm.widthPixels / targetPx)
+        val columnWidth = dm.widthPixels / columns
+        Log.d(TAG, "columns=$columns, columnWidth=$columnWidth")
 
-        // Количество столбцов = ширина экрана / желаемая ширина, но не менее MIN_COLUMNS
-        val columns = maxOf(MIN_COLUMNS, (displayMetrics.widthPixels / targetWidthPx))
+        val lm = StaggeredGridLayoutManager(columns, StaggeredGridLayoutManager.VERTICAL)
+        lm.gapStrategy = StaggeredGridLayoutManager.GAP_HANDLING_NONE
+        grid.layoutManager = lm
 
-        // Ширина одной плитки = (ширина экрана - отступы) / количество столбцов
-        // Отступы: padding у RecyclerView (4dp) * 2 + padding у item (2dp) * 2 * columns
-        // Упростим: просто разделим ширину на columns, а отступы учтем в item_media.xml
-        val columnWidth = displayMetrics.widthPixels / columns
+        // Заполняем исходные URL
+        entries.clear()
+        demoUrls.forEach { entries.add(MediaEntry(it)) }
 
-        Log.d(TAG, "Screen width: ${displayMetrics.widthPixels}px, columns: $columns, column width: ${columnWidth}px")
+        adapter = MediaAdapter(entries, { entry -> onTileClick(entry) }, columnWidth)
+        grid.adapter = adapter
 
-        // --- Настройка StaggeredGridLayoutManager ---
-        // Orientation: VERTICAL (скролл вниз), spanCount: columns
-        val layoutManager = StaggeredGridLayoutManager(columns, StaggeredGridLayoutManager.VERTICAL)
-        // Чтобы элементы не "прыгали" при скролле
-        layoutManager.gapStrategy = StaggeredGridLayoutManager.GAP_HANDLING_NONE
-
-        grid.layoutManager = layoutManager
-        grid.adapter = MediaAdapter(demoItems, { item ->
-            insertText(item.url)
-        }, columnWidth)
+        // Запускаем резолв по одной ссылке
+        entries.forEachIndexed { index, entry ->
+            scope.launch {
+                val res = repository.resolve(entry.sourceUrl)
+                entries[index] = entry.copy(resolution = res)
+                adapter.notifyItemChanged(index)
+            }
+        }
 
         return view
     }
 
+    private fun onTileClick(entry: MediaEntry) {
+        val res = entry.resolution
+        if (res is MediaResolution.Ready) {
+            insertText(res.contentUrl)
+        } else {
+            // Подсказка пользователю — можно через Toast, но в IME он не всегда виден.
+            // Лучше — визуально в плитке (уже сделано оверлеем).
+        }
+    }
+
+    override fun onDestroy() {
+        scope.cancel()
+        super.onDestroy()
+    }
+
+    private val demoUrls = listOf(
+        "https://klipy.com/gifs/cat-hitting-blanket",
+        "https://klipy.com/gifs/cat-wiggle-15",
+//        "https://klipy.com/gifs/cat-cat-crazy-2",
+//        "https://klipy.com/gifs/cat-tuxedo-2",
+//        "https://klipy.com/gifs/sergal-4",
+//        "https://klipy.com/gifs/cat-sniff-7CA",
+//        "https://klipy.com/gifs/cat-kitty-OzS",
+//        "https://klipy.com/gifs/stewly-blume-17",
+//        "https://klipy.com/gifs/brain-damage-cat",
+//        "https://cdn.discordapp.com/attachments/1054140785731309669/1444342699426713681/dragon-cute-paws.gif",
+//        "https://media.discordapp.net/attachments/1023212236921118811/1333008904371699743/attachment.gif",
+    )
+
     private fun insertText(text: String) {
         val ic = currentInputConnection ?: return
         ic.commitText(text, 1)
-    }
-
-    override fun onStartInputView(info: EditorInfo?, restarting: Boolean) {
-        super.onStartInputView(info, restarting)
-        Log.d(TAG, "onStartInputView inputType=${info?.inputType} restarting=$restarting")
     }
 }

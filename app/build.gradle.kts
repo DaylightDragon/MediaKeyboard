@@ -1,5 +1,6 @@
 plugins {
     alias(libs.plugins.android.application)
+    alias(libs.plugins.ksp)
 }
 
 android {
@@ -46,6 +47,12 @@ dependencies {
     androidTestImplementation(libs.ext.junit)
     implementation(libs.coil)
     implementation(libs.coil.network)
+    implementation(libs.security.crypto)
+    implementation(libs.room.runtime)
+    implementation(libs.room.ktx)
+    ksp(libs.room.compiler)
+    implementation(libs.datastore.preferences)
+    implementation(libs.tink.android)
 }
 
 configurations.all {

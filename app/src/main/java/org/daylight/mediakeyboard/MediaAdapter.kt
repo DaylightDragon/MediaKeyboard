@@ -5,20 +5,19 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.ImageView
+import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
+import androidx.recyclerview.widget.StaggeredGridLayoutManager
 import coil3.load
 import coil3.request.error
 import coil3.request.placeholder
+import org.daylight.mediakeyboard.data.MediaResolution
 
 class MediaAdapter(
-    private val items: List<MediaItem>,
-    private val onClick: (MediaItem) -> Unit,
-    private val columnWidth: Int // Ширина одной колонки в пикселях
+    private val items: List<MediaEntry>,
+    private val onClick: (MediaEntry) -> Unit,
+    private val columnWidth: Int
 ) : RecyclerView.Adapter<MediaAdapter.VH>() {
-
-    class VH(v: View) : RecyclerView.ViewHolder(v) {
-        val thumb: ImageView = v.findViewById(R.id.thumb)
-    }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH {
         val v = LayoutInflater.from(parent.context)
@@ -26,31 +25,62 @@ class MediaAdapter(
         return VH(v)
     }
 
-    override fun onBindViewHolder(holder: VH, position: Int) {
-        val item = items[position]
-
-        // 1. Устанавливаем ширину и высоту
-        val params = holder.itemView.layoutParams
-        params.width = columnWidth
-        // Высота = ширина / соотношение сторон
-        params.height = (columnWidth / item.aspectRatio).toInt()
-        holder.itemView.layoutParams = params
-
-        // 2. Загружаем картинку (используем Coil как пример)
-        // В реальном приложении здесь будет загрузка по item.previewUrl или item.url
-        holder.thumb.load(item.previewUrl ?: item.url) {
-            placeholder(R.drawable.ic_placeholder)
-            error(R.drawable.ic_error)
-            listener(
-                onError = { _, result ->
-                    Log.e("Coil", "load failed: ${item.url} -> ${result.throwable.message}")
-                }
-            )
-        }
-
-        // 3. Клик
-        holder.itemView.setOnClickListener { onClick(item) }
+    class VH(v: View) : RecyclerView.ViewHolder(v) {
+        val thumb: ImageView = v.findViewById(R.id.thumb)
+        val overlay: View = v.findViewById(R.id.overlay)
+        val stateIcon: ImageView = v.findViewById(R.id.stateIcon)   // ← добавили
+        val overlayText: TextView = v.findViewById(R.id.overlayText)
     }
 
-    override fun getItemCount() = items.size
+    override fun onBindViewHolder(holder: VH, position: Int) {
+        val entry = items[position]
+        val res = entry.resolution
+        Log.d("Adapter", "bind[$position] url=${entry.sourceUrl} res=$res")
+        val ratio = when (res) {
+            is MediaResolution.Ready -> res.aspectRatio
+            else -> 1f
+        }
+
+        // Приводим к типу, который понимает StaggeredGridLayoutManager
+        val lp = holder.itemView.layoutParams
+                as StaggeredGridLayoutManager.LayoutParams
+        lp.width = columnWidth
+        lp.height = (columnWidth / ratio).toInt().coerceAtLeast(40) // минимум
+        holder.itemView.layoutParams = lp
+
+        when (res) {
+            is MediaResolution.Ready -> {
+                Log.d("Adapter", "  -> Ready, load ${res.previewUrl}")
+                holder.overlay.visibility = View.GONE
+                holder.thumb.load(res.previewUrl) {
+                    placeholder(R.drawable.ic_placeholder)
+                    error(R.drawable.ic_error)
+                }
+            }
+            is MediaResolution.MissingKey -> {
+                Log.d("Adapter", "  -> MissingKey: ${res.displayName}")
+                holder.overlay.visibility = View.VISIBLE
+                holder.stateIcon.setImageResource(R.drawable.ic_no_key)
+                holder.stateIcon.visibility = View.VISIBLE
+                holder.overlayText.text = "Нужен ключ ${res.displayName}"
+            }
+            is MediaResolution.Failed -> {
+                Log.d("Adapter", "  -> Failed: ${res.reason}")
+                holder.overlay.visibility = View.VISIBLE
+                holder.stateIcon.setImageResource(R.drawable.ic_error)
+                holder.stateIcon.visibility = View.VISIBLE
+                holder.overlayText.text = res.reason?.take(40) ?: "Ошибка"
+            }
+            null -> {
+                Log.d("Adapter", "  -> null (pending)")
+                holder.overlay.visibility = View.VISIBLE
+                holder.stateIcon.visibility = View.GONE
+                holder.overlayText.text = "…"
+            }
+        }
+
+        holder.itemView.setOnClickListener { onClick(entry) }
+    }
+
+    override fun getItemCount(): Int = items.size
 }

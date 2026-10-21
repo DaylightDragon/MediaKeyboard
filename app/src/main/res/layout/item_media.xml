@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    android:layout_width="wrap_content"
-    android:layout_height="wrap_content"
-    android:padding="2dp"> <!-- Небольшой отступ между плитками -->
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:padding="2dp">
 
     <ImageView
         android:id="@+id/thumb"
@@ -11,4 +11,32 @@
         android:scaleType="centerCrop"
         android:background="#FF333333"
         android:contentDescription="@null" />
+
+    <LinearLayout
+        android:id="@+id/overlay"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:gravity="center"
+        android:background="#CC000000"
+        android:visibility="gone"
+        android:padding="4dp">
+
+        <ImageView
+            android:id="@+id/stateIcon"
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:contentDescription="@null" />
+
+        <TextView
+            android:id="@+id/overlayText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:textColor="#FFFFFFFF"
+            android:textSize="10sp"
+            android:gravity="center"
+            android:maxLines="2"
+            android:ellipsize="end" />
+    </LinearLayout>
 </FrameLayout>

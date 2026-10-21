@@ -1,5 +1,6 @@
 [versions]
 agp = "9.4.1"
+datastorePreferences = "1.2.1"
 kotlin = "2.2.0"
 coil = "3.6.3"
 junit = "4.13.2"
@@ -9,8 +10,12 @@ appcompat = "1.6.1"
 material = "1.10.0"
 activityKtx = "1.8.0"
 constraintlayout = "2.1.4"
+ksp = "2.3.6"
+room = "2.8.5"
+tinkAndroid = "1.23.0"
 
 [libraries]
+datastore-preferences = { module = "androidx.datastore:datastore-preferences", version.ref = "datastorePreferences" }
 kotlin-bom = { group = "org.jetbrains.kotlin", name = "kotlin-bom", version.ref = "kotlin" }
 coil = { module = "io.coil-kt.coil3:coil", version.ref = "coil" }
 coil-network = { module = "io.coil-kt.coil3:coil-network-okhttp", version.ref = "coil" }
@@ -21,7 +26,13 @@ appcompat = { group = "androidx.appcompat", name = "appcompat", version.ref = "a
 material = { group = "com.google.android.material", name = "material", version.ref = "material" }
 activity-ktx = { group = "androidx.activity", name = "activity-ktx", version.ref = "activityKtx" }
 constraintlayout = { group = "androidx.constraintlayout", name = "constraintlayout", version.ref = "constraintlayout" }
+security-crypto = { module = "androidx.security:security-crypto", version = "1.1.0" }
+room-runtime = { module = "androidx.room:room-runtime", version.ref = "room" }
+room-ktx     = { module = "androidx.room:room-ktx",     version.ref = "room" }
+room-compiler = { module = "androidx.room:room-compiler", version.ref = "room" }
+tink-android = { module = "com.google.crypto.tink:tink-android", version.ref = "tinkAndroid" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
+ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
 

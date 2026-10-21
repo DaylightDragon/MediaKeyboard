@@ -2,7 +2,6 @@
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:minHeight="280dp"
     android:orientation="vertical"
     android:background="#FF1E1E1E">
 
@@ -11,6 +10,7 @@
         android:layout_height="48dp"
         android:background="#FF2A2A2A"
         android:scrollbars="none">
+
         <LinearLayout
             android:id="@+id/groupsContainer"
             android:layout_width="wrap_content"
@@ -20,11 +20,11 @@
             android:gravity="center_vertical" />
     </HorizontalScrollView>
 
+    <!-- Фиксированная высота: 280dp - 48dp = 232dp -->
     <androidx.recyclerview.widget.RecyclerView
         android:id="@+id/mediaGrid"
         android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1"
+        android:layout_height="232dp"
         android:padding="4dp"
         android:clipToPadding="false" />
 
