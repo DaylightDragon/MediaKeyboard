@@ -11,20 +11,11 @@ import coil3.gif.GifDecoder
 
 class App : Application(), SingletonImageLoader.Factory {
     override fun newImageLoader(context: PlatformContext): ImageLoader {
-        return ImageLoader.Builder(context).build()
-//        var loader = ImageLoader.Builder(context)
-//            .components {
-////                if (Build.VERSION.SDK_INT >= 28) {
-////                    // Явно включаем перезапись задержки, если она слишком мала
-//                    add(AnimatedImageDecoder.Factory())
-////                } else {
-////                    add(GifDecoder.Factory(enforceMinimumFrameDelay = true))
-////                }
-//            }
-//            .build()
-//
-//        Log.d("CoilGif", "Components: ${loader.components}")
-//        Log.d("CoilGif", "Has AnimatedImageDecoder: ${loader.components.toString().contains("AnimatedImageDecoder")}")
-//        return loader
+        var loader = ImageLoader.Builder(context).build()
+        loader.components.decoderFactories.forEach { factory ->
+            Log.d("CoilGif", "Decoder Factory: ${factory::class.java.name}")
+        }
+        Log.d("CoilGif", "Has AnimatedImageDecoder: ${loader.components.toString().contains("AnimatedImageDecoder")}")
+        return loader
     }
 }

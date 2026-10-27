@@ -59,18 +59,19 @@ class MediaAdapter(
                 holder.thumb.load(res.contentUrl) {
                     placeholder(R.drawable.ic_placeholder)
                     error(R.drawable.ic_error)
+                    allowHardware(false)
                     onAnimationStart {
                         Log.d("MediaKeyboard", "Animation Started")
                     }
                     listener(
                         onSuccess = { _, result ->
                             // Принудительно запускаем анимацию
-                            val drawable = result.image
-                            if (drawable is Animatable2Compat) {
-                                drawable.start()
-                            } else if (drawable is Animatable) {
-                                drawable.start()
-                            }
+//                            val drawable = result.image
+//                            if (drawable is Animatable2Compat) {
+//                                drawable.start()
+//                            } else if (drawable is Animatable) {
+//                                drawable.start()
+//                            }
                         }
                     )
                 }
