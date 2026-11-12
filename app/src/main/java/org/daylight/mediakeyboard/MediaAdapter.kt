@@ -1,6 +1,7 @@
 package org.daylight.mediakeyboard
 
 import android.graphics.drawable.Animatable
+import android.graphics.drawable.AnimatedImageDrawable
 import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
@@ -9,10 +10,8 @@ import android.widget.ImageView
 import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
 import androidx.recyclerview.widget.StaggeredGridLayoutManager
-import androidx.vectordrawable.graphics.drawable.Animatable2Compat
-import coil3.gif.onAnimationStart
+import coil3.asDrawable
 import coil3.load
-import coil3.request.allowHardware
 import coil3.request.error
 import coil3.request.placeholder
 import org.daylight.mediakeyboard.data.MediaResolution
@@ -20,7 +19,7 @@ import org.daylight.mediakeyboard.data.MediaResolution
 class MediaAdapter(
     private val items: List<MediaEntry>,
     private val onClick: (MediaEntry) -> Unit,
-    private val columnWidth: Int
+    private val columnWidth: Int,
 ) : RecyclerView.Adapter<MediaAdapter.VH>() {
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH {
@@ -32,7 +31,7 @@ class MediaAdapter(
     class VH(v: View) : RecyclerView.ViewHolder(v) {
         val thumb: ImageView = v.findViewById(R.id.thumb)
         val overlay: View = v.findViewById(R.id.overlay)
-        val stateIcon: ImageView = v.findViewById(R.id.stateIcon)   // ← добавили
+        val stateIcon: ImageView = v.findViewById(R.id.stateIcon)
         val overlayText: TextView = v.findViewById(R.id.overlayText)
     }
 
@@ -59,19 +58,19 @@ class MediaAdapter(
                 holder.thumb.load(res.contentUrl) {
                     placeholder(R.drawable.ic_placeholder)
                     error(R.drawable.ic_error)
-                    allowHardware(false)
-                    onAnimationStart {
-                        Log.d("MediaKeyboard", "Animation Started")
-                    }
                     listener(
                         onSuccess = { _, result ->
-                            // Принудительно запускаем анимацию
-//                            val drawable = result.image
-//                            if (drawable is Animatable2Compat) {
-//                                drawable.start()
-//                            } else if (drawable is Animatable) {
-//                                drawable.start()
-//                            }
+                            val drawable = holder.thumb.drawable ?: result.image.asDrawable(holder.thumb.resources)
+                            Log.d("MediaAdapter", "onSuccess: drawable=${drawable::class.java.name}, isAnimatable=${drawable is Animatable}")
+                            if (drawable is AnimatedImageDrawable) {
+                                drawable.repeatCount = AnimatedImageDrawable.REPEAT_INFINITE
+                                drawable.start()
+                            } else if (drawable is Animatable) {
+                                drawable.start()
+                            }
+                        },
+                        onError = { _, result ->
+                            Log.e("MediaAdapter", "onError: ${result.throwable.message}", result.throwable)
                         }
                     )
                 }
