@@ -12,6 +12,7 @@ import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.RecyclerView
@@ -90,19 +91,83 @@ class MainActivity : AppCompatActivity() {
             onClick = { entry ->
                 val res = entry.resolution as? MediaResolution.Ready
                 if (res != null) {
-                    Toast.makeText(this, "Ссылка скопирована или готова: ${res.sourceUrl}", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this, "Ссылка: ${res.sourceUrl}", Toast.LENGTH_SHORT).show()
                 }
             },
             columnWidth = columnWidth,
             onLongClick = { entry ->
-                lifecycleScope.launch {
-                    repository.deleteMedia(entry.sourceUrl)
-                    Toast.makeText(this@MainActivity, "Удалено из медиатеки", Toast.LENGTH_SHORT).show()
-                    refreshAllData()
-                }
+                showMainItemOptionsDialog(entry)
             }
         )
         grid.adapter = adapter
+    }
+
+    private fun showMainItemOptionsDialog(entry: MediaEntry) {
+        val isFav = (entry.resolution as? MediaResolution.Ready)?.isFavorite == true
+        val options = arrayOf(
+            if (isFav) "Убрать из избранного" else "В избранное",
+            "Настроить категории",
+            "Удалить"
+        )
+
+        AlertDialog.Builder(this)
+            .setTitle("Управление медиа")
+            .setItems(options) { _, which ->
+                when (which) {
+                    0 -> {
+                        lifecycleScope.launch {
+                            repository.toggleFavorite(entry.sourceUrl)
+                            refreshAllData()
+                        }
+                    }
+                    1 -> showMainEditCategoriesDialog(entry)
+                    2 -> {
+                        lifecycleScope.launch {
+                            repository.deleteMedia(entry.sourceUrl)
+                            Toast.makeText(this@MainActivity, "Удалено из медиатеки", Toast.LENGTH_SHORT).show()
+                            refreshAllData()
+                        }
+                    }
+                }
+            }
+            .setNegativeButton("Отмена", null)
+            .show()
+    }
+
+    private fun showMainEditCategoriesDialog(entry: MediaEntry) {
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(40, 20, 40, 20)
+        }
+
+        val checkBoxes = mutableListOf<Pair<Long, CheckBox>>()
+
+        lifecycleScope.launch {
+            val categories = repository.getAllCategories()
+            val assignedCatIds = repository.getCategoryIdsForMedia(entry.sourceUrl).toSet()
+
+            categories.forEach { cat ->
+                val cb = CheckBox(this@MainActivity).apply {
+                    text = cat.name
+                    isChecked = assignedCatIds.contains(cat.id)
+                }
+                container.addView(cb)
+                checkBoxes.add(cat.id to cb)
+            }
+
+            AlertDialog.Builder(this@MainActivity)
+                .setTitle("Настройка категорий")
+                .setView(container)
+                .setPositiveButton("Сохранить") { _, _ ->
+                    lifecycleScope.launch {
+                        val selectedCatIds = checkBoxes.filter { it.second.isChecked }.map { it.first }
+                        repository.setCategoriesForMedia(entry.sourceUrl, selectedCatIds)
+                        refreshAllData()
+                    }
+                }
+                .setNegativeButton("Отмена", null)
+                .show()
+        }
     }
 
     private fun initAddMediaSection() {

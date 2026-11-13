@@ -1,5 +1,6 @@
 package org.daylight.mediakeyboard
 
+import android.content.Context
 import android.content.Intent
 import android.inputmethodservice.InputMethodService
 import android.util.Log
@@ -14,6 +15,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
 import androidx.recyclerview.widget.StaggeredGridLayoutManager
+import androidx.room.InvalidationTracker
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -45,16 +47,30 @@ class MediaKeyboardService : InputMethodService() {
     private var selectedCategoryId: Long = FILTER_ALL
     private var columnWidth: Int = 200
 
+    private var dbObserver: InvalidationTracker.Observer? = null
+
     override fun onCreate() {
         super.onCreate()
         val registry = ResolverRegistry.createDefault()
         val localCacher = LocalMediaCacher(this)
+        val db = AppDatabase.get(this)
         repository = MediaRepository(
-            dao = AppDatabase.get(this).mediaDao(),
+            dao = db.mediaDao(),
             registry = registry,
             apiKeyStore = ApiKeyStore.get(this),
             localCacher = localCacher
         )
+
+        dbObserver = object : InvalidationTracker.Observer(
+            arrayOf("media_cache", "categories", "media_category_cross_ref")
+        ) {
+            override fun onInvalidated(tables: Set<String>) {
+                scope.launch {
+                    refreshCategoriesAndMedia()
+                }
+            }
+        }
+        dbObserver?.let { db.invalidationTracker.addObserver(it) }
     }
 
     override fun onCreateInputView(): View {
@@ -81,7 +97,6 @@ class MediaKeyboardService : InputMethodService() {
         )
         grid.adapter = adapter
 
-        // Загружаем категории и список медиа
         refreshCategoriesAndMedia()
 
         return view
@@ -113,17 +128,13 @@ class MediaKeyboardService : InputMethodService() {
 
         val categories = repository.getAllCategories()
 
-        // Вкладка "Все"
         addTabChip("Все", FILTER_ALL)
-        // Вкладка "Избранное"
         addTabChip("Избранное", FILTER_FAVORITES)
 
-        // Вкладки пользовательских категорий
         categories.forEach { cat ->
             addTabChip(cat.name, cat.id)
         }
 
-        // Кнопки действий
         addActionChip("+ Ссылка") { showAddMediaDialog() }
         addActionChip("Категории") { showManageCategoriesDialog() }
         addActionChip("Приложение") { openMainActivity() }
@@ -165,17 +176,21 @@ class MediaKeyboardService : InputMethodService() {
     }
 
     private suspend fun loadMediaForSelectedCategory() {
+        val prefs = getSharedPreferences("media_keyboard_prefs", MODE_PRIVATE)
+        val isDemoSeeded = prefs.getBoolean("demo_seeded", false)
+
         var mediaList: List<MediaEntity> = when (selectedCategoryId) {
             FILTER_ALL -> repository.getAllSaved()
             FILTER_FAVORITES -> repository.getFavorites()
             else -> repository.getMediaForCategory(selectedCategoryId)
         }
 
-        // Если в первой установке все пусто, заполняем демо-ссылками
-        if (selectedCategoryId == FILTER_ALL && mediaList.isEmpty()) {
+        // Демо ссылки добавляем только один раз при самом первом запуске
+        if (!isDemoSeeded && mediaList.isEmpty()) {
             demoUrls.forEach { url ->
                 repository.resolve(url)
             }
+            prefs.edit().putBoolean("demo_seeded", true).apply()
             mediaList = repository.getAllSaved()
         }
 
@@ -201,7 +216,6 @@ class MediaKeyboardService : InputMethodService() {
         }
         adapter.notifyDataSetChanged()
 
-        // Дорезолвить те, у которых еще не был сделан resolve
         entries.forEachIndexed { index, entry ->
             if (entry.resolution == null) {
                 scope.launch {
@@ -292,7 +306,8 @@ class MediaKeyboardService : InputMethodService() {
                     }
 
                     val btnDelete = Button(this@MediaKeyboardService).apply {
-                        text = "❌"
+                        text = "Удалить"
+                        textSize = 11f
                         setOnClickListener {
                             scope.launch {
                                 repository.deleteCategory(cat.id)
@@ -418,11 +433,11 @@ class MediaKeyboardService : InputMethodService() {
         if (res is MediaResolution.Ready) {
             insertText(res.sourceUrl)
             Log.d(TAG, "Content URL: " + res.contentUrl)
-            Log.d(TAG, "PreviewUrl URL: " + res.previewUrl)
         }
     }
 
     override fun onDestroy() {
+        dbObserver?.let { AppDatabase.get(this).invalidationTracker.removeObserver(it) }
         scope.cancel()
         super.onDestroy()
     }
@@ -435,16 +450,7 @@ class MediaKeyboardService : InputMethodService() {
 
     override fun onStartInputView(editorInfo: EditorInfo?, restarting: Boolean) {
         super.onStartInputView(editorInfo, restarting)
-
-        entries.forEachIndexed { index, entry ->
-            if (entry.resolution is MediaResolution.MissingKey) {
-                scope.launch {
-                    val res = repository.resolve(entry.sourceUrl, forceReload = true)
-                    entries[index] = entry.copy(resolution = res)
-                    adapter.notifyItemChanged(index)
-                }
-            }
-        }
+        refreshCategoriesAndMedia()
     }
 
     private fun insertText(text: String) {

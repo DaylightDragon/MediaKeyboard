@@ -8,6 +8,7 @@ import org.daylight.mediakeyboard.data.ResolverRegistry
 import org.daylight.mediakeyboard.data.dto.CategoryEntity
 import org.daylight.mediakeyboard.data.dto.MediaDao
 import org.daylight.mediakeyboard.data.dto.MediaEntity
+import java.io.File
 
 class MediaRepository(
     private val dao: MediaDao,
@@ -28,13 +29,25 @@ class MediaRepository(
                     return MediaResolution.Failed(cached.serviceId ?: "unknown", cached.failReason)
                 }
 
-                var displayPreviewUrl = cached.localPreviewPath ?: cached.previewUrl
-                if (cached.localPreviewPath == null && localCacher?.shouldCacheLocally(cached.previewUrl) == true) {
+                var displayPreviewUrl = cached.previewUrl
+                if (!cached.localPreviewPath.isNullOrEmpty()) {
+                    val path = cached.localPreviewPath.removePrefix("file://")
+                    val file = File(path)
+                    if (file.exists() && file.length() > 100) {
+                        displayPreviewUrl = cached.localPreviewPath
+                    } else {
+                        dao.upsert(cached.copy(localPreviewPath = null))
+                    }
+                } else if (localCacher?.shouldCacheLocally(cached.previewUrl) == true) {
                     val downloadedPath = localCacher.cachePreview(cached.previewUrl)
                     if (downloadedPath != null) {
                         displayPreviewUrl = downloadedPath
                         dao.upsert(cached.copy(localPreviewPath = downloadedPath))
                     }
+                }
+
+                if (displayPreviewUrl.isBlank()) {
+                    displayPreviewUrl = cached.contentUrl.ifBlank { sourceUrl }
                 }
 
                 return MediaResolution.Ready(
