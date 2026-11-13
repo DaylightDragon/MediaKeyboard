@@ -21,11 +21,25 @@
     </HorizontalScrollView>
 
     <!-- Фиксированная высота: 280dp - 48dp = 232dp -->
-    <androidx.recyclerview.widget.RecyclerView
-        android:id="@+id/mediaGrid"
+    <FrameLayout
         android:layout_width="match_parent"
-        android:layout_height="232dp"
-        android:padding="4dp"
-        android:clipToPadding="false" />
+        android:layout_height="232dp">
+
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/mediaGrid"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:padding="4dp"
+            android:clipToPadding="false" />
+
+        <!-- Оверлей для панелей управления (Добавление / Категории / Меню) -->
+        <FrameLayout
+            android:id="@+id/panelOverlay"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:background="#FA1E1E1E"
+            android:visibility="gone" />
+
+    </FrameLayout>
 
 </LinearLayout>

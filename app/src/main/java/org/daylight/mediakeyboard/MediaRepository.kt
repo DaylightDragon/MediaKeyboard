@@ -1,54 +1,82 @@
-package org.daylight.mediakeyboard.data
+package org.daylight.mediakeyboard
 
 import android.util.Log
+import org.daylight.mediakeyboard.data.ApiKeyStore
+import org.daylight.mediakeyboard.data.LocalMediaCacher
+import org.daylight.mediakeyboard.data.MissingApiKeyException
+import org.daylight.mediakeyboard.data.ResolverRegistry
+import org.daylight.mediakeyboard.data.dto.CategoryEntity
 import org.daylight.mediakeyboard.data.dto.MediaDao
 import org.daylight.mediakeyboard.data.dto.MediaEntity
 
 class MediaRepository(
     private val dao: MediaDao,
     private val registry: ResolverRegistry,
-    private val apiKeyStore: ApiKeyStore
+    private val apiKeyStore: ApiKeyStore,
+    private val localCacher: LocalMediaCacher? = null
 ) {
 
     /**
-     * Возвращает ResolvedMedia для отображения/вставки.
-     * Никогда не бросает: ошибки возвращает как FailedMedia.
+     * Возвращает MediaResolution для отображения/вставки.
+     * Автоматически скачивает превью локально для ссылок Discord или прямых ссылок.
      */
     suspend fun resolve(sourceUrl: String, forceReload: Boolean = false): MediaResolution {
         if (!forceReload) {
             val cached = dao.get(sourceUrl)
             if (cached != null) {
-                return if (cached.failed) {
-                    MediaResolution.Failed(cached.serviceId ?: "unknown", cached.failReason)
-                } else {
-                    MediaResolution.Ready(
-                        sourceUrl = sourceUrl,
-                        previewUrl = cached.previewUrl,
-                        contentUrl = cached.contentUrl,
-                        aspectRatio = cached.aspectRatio,
-                        title = cached.title
-                    )
+                if (cached.failed) {
+                    return MediaResolution.Failed(cached.serviceId ?: "unknown", cached.failReason)
                 }
+
+                var displayPreviewUrl = cached.localPreviewPath ?: cached.previewUrl
+                if (cached.localPreviewPath == null && localCacher?.shouldCacheLocally(cached.previewUrl) == true) {
+                    val downloadedPath = localCacher.cachePreview(cached.previewUrl)
+                    if (downloadedPath != null) {
+                        displayPreviewUrl = downloadedPath
+                        dao.upsert(cached.copy(localPreviewPath = downloadedPath))
+                    }
+                }
+
+                return MediaResolution.Ready(
+                    sourceUrl = sourceUrl,
+                    previewUrl = displayPreviewUrl,
+                    contentUrl = cached.contentUrl,
+                    aspectRatio = cached.aspectRatio,
+                    title = cached.title,
+                    isFavorite = cached.isFavorite
+                )
             }
         }
 
         val resolver = registry.find(sourceUrl)
         if (resolver == null) {
-            // Прямая ссылка — нечего резолвить, просто используем её как есть.
-            // Аспект-ratio неизвестен, ставим 1.0, скорректируем после загрузки (см. п.8).
-            dao.upsert(
-                MediaEntity(
-                    sourceUrl = sourceUrl,
-                    serviceId = null,
-                    previewUrl = sourceUrl,
-                    contentUrl = sourceUrl,
-                    aspectRatio = 1f,
-                    title = null,
-                    resolvedAt = System.currentTimeMillis(),
-                    failed = false
-                )
+            // Прямая ссылка (или Discord) — не через API-резолвер.
+            var localPath: String? = null
+            if (localCacher?.shouldCacheLocally(sourceUrl) == true) {
+                localPath = localCacher.cachePreview(sourceUrl)
+            }
+
+            val entity = MediaEntity(
+                sourceUrl = sourceUrl,
+                serviceId = null,
+                previewUrl = sourceUrl,
+                localPreviewPath = localPath,
+                contentUrl = sourceUrl,
+                aspectRatio = 1f,
+                title = null,
+                resolvedAt = System.currentTimeMillis(),
+                failed = false
             )
-            return MediaResolution.Ready(sourceUrl, sourceUrl, sourceUrl, 1f, null)
+            dao.upsert(entity)
+
+            return MediaResolution.Ready(
+                sourceUrl = sourceUrl,
+                previewUrl = localPath ?: sourceUrl,
+                contentUrl = sourceUrl,
+                aspectRatio = 1f,
+                title = null,
+                isFavorite = false
+            )
         }
 
         val ref = resolver.extractRef(sourceUrl)
@@ -57,33 +85,43 @@ class MediaRepository(
         return try {
             val apiKey = apiKeyStore.get(resolver.serviceId)
             Log.d("MediaRepo", "apiKey for ${resolver.serviceId} = ${apiKey?.take(6)}… (len=${apiKey?.length})")
-            val resolved = resolver.resolve(ref, apiKeyStore.get(resolver.serviceId))
-            dao.upsert(
-                MediaEntity(
-                    sourceUrl = sourceUrl,
-                    serviceId = resolver.serviceId,
-                    previewUrl = resolved.previewUrl,
-                    contentUrl = resolved.contentUrl,
-                    aspectRatio = resolved.aspectRatio,
-                    title = resolved.title,
-                    resolvedAt = System.currentTimeMillis(),
-                    failed = false
-                )
+            val resolved = resolver.resolve(ref, apiKey)
+
+            var localPath: String? = null
+            if (localCacher?.shouldCacheLocally(resolved.previewUrl) == true) {
+                localPath = localCacher.cachePreview(resolved.previewUrl)
+            }
+
+            val entity = MediaEntity(
+                sourceUrl = sourceUrl,
+                serviceId = resolver.serviceId,
+                previewUrl = resolved.previewUrl,
+                localPreviewPath = localPath,
+                contentUrl = resolved.contentUrl,
+                aspectRatio = resolved.aspectRatio,
+                title = resolved.title,
+                resolvedAt = System.currentTimeMillis(),
+                failed = false
             )
+            dao.upsert(entity)
+
             MediaResolution.Ready(
-                sourceUrl, resolved.previewUrl, resolved.contentUrl,
-                resolved.aspectRatio, resolved.title
+                sourceUrl = sourceUrl,
+                previewUrl = localPath ?: resolved.previewUrl,
+                contentUrl = resolved.contentUrl,
+                aspectRatio = resolved.aspectRatio,
+                title = resolved.title,
+                isFavorite = false
             )
         } catch (e: MissingApiKeyException) {
-            // НЕ сохраняем в failed — ключ может появиться позже, тогда повторим.
             MediaResolution.MissingKey(resolver.serviceId, resolver.displayName)
         } catch (e: Exception) {
-            // Ошибку API сохраняем как failed — больше не дёргаем.
             dao.upsert(
                 MediaEntity(
                     sourceUrl = sourceUrl,
                     serviceId = resolver.serviceId,
                     previewUrl = "",
+                    localPreviewPath = null,
                     contentUrl = "",
                     aspectRatio = 1f,
                     title = null,
@@ -95,6 +133,47 @@ class MediaRepository(
             MediaResolution.Failed(resolver.serviceId, e.message)
         }
     }
+
+    // --- Избранное и управление элементами ---
+
+    suspend fun getAllSaved(): List<MediaEntity> = dao.all()
+
+    suspend fun getFavorites(): List<MediaEntity> = dao.getFavorites()
+
+    suspend fun toggleFavorite(sourceUrl: String): Boolean {
+        val cached = dao.get(sourceUrl) ?: return false
+        val newFav = !cached.isFavorite
+        dao.setFavorite(sourceUrl, newFav)
+        return newFav
+    }
+
+    suspend fun deleteMedia(sourceUrl: String) {
+        dao.delete(sourceUrl)
+    }
+
+    // --- Категории ---
+
+    suspend fun getAllCategories(): List<CategoryEntity> = dao.getAllCategories()
+
+    suspend fun addCategory(name: String): Long {
+        val trimmed = name.trim()
+        if (trimmed.isEmpty()) return -1L
+        return dao.insertCategory(CategoryEntity(name = trimmed))
+    }
+
+    suspend fun deleteCategory(categoryId: Long) {
+        dao.deleteCategory(categoryId)
+    }
+
+    suspend fun getMediaForCategory(categoryId: Long): List<MediaEntity> =
+        dao.getMediaForCategory(categoryId)
+
+    suspend fun getCategoryIdsForMedia(sourceUrl: String): List<Long> =
+        dao.getCategoryIdsForMedia(sourceUrl)
+
+    suspend fun setCategoriesForMedia(sourceUrl: String, categoryIds: List<Long>) {
+        dao.setCategoriesForMedia(sourceUrl, categoryIds)
+    }
 }
 
 sealed class MediaResolution {
@@ -103,7 +182,8 @@ sealed class MediaResolution {
         val previewUrl: String,
         val contentUrl: String,
         val aspectRatio: Float,
-        val title: String?
+        val title: String?,
+        val isFavorite: Boolean = false
     ) : MediaResolution()
 
     data class MissingKey(val serviceId: String, val displayName: String) : MediaResolution()

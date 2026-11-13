@@ -15,11 +15,13 @@ import coil3.load
 import coil3.request.error
 import coil3.request.placeholder
 import org.daylight.mediakeyboard.data.MediaResolution
+import java.io.File
 
 class MediaAdapter(
     private val items: List<MediaEntry>,
     private val onClick: (MediaEntry) -> Unit,
     private val columnWidth: Int,
+    private val onLongClick: ((MediaEntry) -> Unit)? = null
 ) : RecyclerView.Adapter<MediaAdapter.VH>() {
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH {
@@ -44,18 +46,16 @@ class MediaAdapter(
             else -> 1f
         }
 
-        // Приводим к типу, который понимает StaggeredGridLayoutManager
-        val lp = holder.itemView.layoutParams
-                as StaggeredGridLayoutManager.LayoutParams
+        val lp = holder.itemView.layoutParams as StaggeredGridLayoutManager.LayoutParams
         lp.width = columnWidth
-        lp.height = (columnWidth / ratio).toInt().coerceAtLeast(40) // минимум
+        lp.height = (columnWidth / ratio).toInt().coerceAtLeast(40)
         holder.itemView.layoutParams = lp
 
         when (res) {
             is MediaResolution.Ready -> {
-                Log.d("Adapter", "  -> Ready, load ${res.contentUrl}")
+                Log.d("Adapter", "  -> Ready, load previewUrl=${res.previewUrl}")
                 holder.overlay.visibility = View.GONE
-                holder.thumb.load(res.contentUrl) {
+                holder.thumb.load(res.previewUrl) {
                     placeholder(R.drawable.ic_placeholder)
                     error(R.drawable.ic_error)
                     listener(
@@ -71,6 +71,18 @@ class MediaAdapter(
                         },
                         onError = { _, result ->
                             Log.e("MediaAdapter", "onError: ${result.throwable.message}", result.throwable)
+                            if (res.previewUrl.startsWith("file://")) {
+                                val path = res.previewUrl.removePrefix("file://")
+                                val corruptFile = File(path)
+                                if (corruptFile.exists()) {
+                                    Log.w("MediaAdapter", "Deleting corrupt cached file: $path")
+                                    corruptFile.delete()
+                                }
+                                holder.thumb.load(res.contentUrl) {
+                                    placeholder(R.drawable.ic_placeholder)
+                                    error(R.drawable.ic_error)
+                                }
+                            }
                         }
                     )
                 }
@@ -98,6 +110,10 @@ class MediaAdapter(
         }
 
         holder.itemView.setOnClickListener { onClick(entry) }
+        holder.itemView.setOnLongClickListener {
+            onLongClick?.invoke(entry)
+            true
+        }
     }
 
     override fun getItemCount(): Int = items.size
