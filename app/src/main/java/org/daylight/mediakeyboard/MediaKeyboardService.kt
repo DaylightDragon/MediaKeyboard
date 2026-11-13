@@ -13,6 +13,8 @@ import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.recyclerview.widget.RecyclerView
 import androidx.recyclerview.widget.StaggeredGridLayoutManager
 import androidx.room.InvalidationTracker
@@ -78,6 +80,13 @@ class MediaKeyboardService : InputMethodService() {
         groupsContainer = view.findViewById(R.id.groupsContainer)
         panelOverlay = view.findViewById(R.id.panelOverlay)
         val grid = view.findViewById<RecyclerView>(R.id.mediaGrid)
+
+        ViewCompat.setOnApplyWindowInsetsListener(view) { _, insets ->
+            val navBarHeight = insets.getInsets(WindowInsetsCompat.Type.navigationBars()).bottom
+            val extraBottom = maxOf(navBarHeight, (48 * resources.displayMetrics.density).toInt())
+            panelOverlay?.setPadding(0, 0, 0, extraBottom)
+            insets
+        }
 
         val dm = resources.displayMetrics
         Log.d(TAG, "displayMetrics.widthPixels=${dm.widthPixels}, density=${dm.density}")
