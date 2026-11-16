@@ -17,6 +17,8 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.RecyclerView
 import androidx.recyclerview.widget.StaggeredGridLayoutManager
+import androidx.room.InvalidationTracker
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import org.daylight.mediakeyboard.data.ApiKeyStore
 import org.daylight.mediakeyboard.data.AppDatabase
@@ -32,6 +34,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var adapter: MediaAdapter
     private val savedEntries = mutableListOf<MediaEntry>()
     private val categoryCheckBoxes = mutableListOf<Pair<Long, CheckBox>>()
+    private var dbObserver: InvalidationTracker.Observer? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -39,8 +42,9 @@ class MainActivity : AppCompatActivity() {
 
         val registry = ResolverRegistry.createDefault()
         val localCacher = LocalMediaCacher(this)
+        val db = AppDatabase.get(this)
         repository = MediaRepository(
-            dao = AppDatabase.get(this).mediaDao(),
+            dao = db.mediaDao(),
             registry = registry,
             apiKeyStore = ApiKeyStore.get(this),
             localCacher = localCacher
@@ -50,6 +54,18 @@ class MainActivity : AppCompatActivity() {
         initMediaGrid()
         initAddMediaSection()
         initCategoryManagementSection()
+
+        // Двусторонняя реактивная синхронизация при изменениях в БД (например из клавиатуры)
+        dbObserver = object : InvalidationTracker.Observer(
+            arrayOf("media_cache", "categories", "media_category_cross_ref")
+        ) {
+            override fun onInvalidated(tables: Set<String>) {
+                lifecycleScope.launch(Dispatchers.Main.immediate) {
+                    refreshAllData()
+                }
+            }
+        }
+        dbObserver?.let { db.invalidationTracker.addObserver(it) }
 
         refreshAllData()
     }
@@ -308,6 +324,11 @@ class MainActivity : AppCompatActivity() {
         super.onResume()
         updateStatus(findViewById(R.id.statusText))
         refreshAllData()
+    }
+
+    override fun onDestroy() {
+        dbObserver?.let { AppDatabase.get(this).invalidationTracker.removeObserver(it) }
+        super.onDestroy()
     }
 
     private fun updateStatus(tv: TextView) {
