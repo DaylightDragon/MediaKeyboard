@@ -47,7 +47,7 @@ class MediaAdapter(
         }
 
         val lp = holder.itemView.layoutParams as StaggeredGridLayoutManager.LayoutParams
-        lp.width = columnWidth
+        lp.width = ViewGroup.LayoutParams.MATCH_PARENT
         lp.height = (columnWidth / ratio).toInt().coerceAtLeast(40)
         holder.itemView.layoutParams = lp
 

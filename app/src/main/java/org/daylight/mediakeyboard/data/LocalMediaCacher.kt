@@ -21,19 +21,11 @@ class LocalMediaCacher(private val context: Context) {
     }
 
     /**
-     * Проверяет, следует ли закэшировать этот превью URL локально.
-     * Ссылки Discord CDN и прямые ссылки на изображения сохраняются локально.
+     * Все веб-ссылки превью закэшируются локально один раз при добавлении,
+     * чтобы не выполнять повторных сетевых запросов к API/CDN.
      */
     fun shouldCacheLocally(url: String): Boolean {
-        if (!url.startsWith("http://") && !url.startsWith("https://")) return false
-        val lower = url.lowercase()
-        return lower.contains("discordapp.com") ||
-                lower.contains("discordapp.net") ||
-                lower.endsWith(".gif") ||
-                lower.endsWith(".webp") ||
-                lower.endsWith(".png") ||
-                lower.endsWith(".jpg") ||
-                lower.endsWith(".jpeg")
+        return url.startsWith("http://") || url.startsWith("https://")
     }
 
     /**

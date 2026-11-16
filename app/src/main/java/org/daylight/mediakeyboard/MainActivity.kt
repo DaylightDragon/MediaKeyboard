@@ -1,17 +1,23 @@
 package org.daylight.mediakeyboard
 
+import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import android.provider.Settings
 import android.util.Log
+import android.view.View
 import android.view.ViewGroup
 import android.view.inputmethod.InputMethodManager
+import android.widget.AdapterView
+import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.LinearLayout
+import android.widget.Spinner
 import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
@@ -20,21 +26,86 @@ import androidx.recyclerview.widget.StaggeredGridLayoutManager
 import androidx.room.InvalidationTracker
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import org.daylight.mediakeyboard.data.ApiKeyStore
 import org.daylight.mediakeyboard.data.AppDatabase
+import org.daylight.mediakeyboard.data.LibraryExporter
 import org.daylight.mediakeyboard.data.LocalMediaCacher
 import org.daylight.mediakeyboard.data.MediaRepository
 import org.daylight.mediakeyboard.data.MediaResolution
 import org.daylight.mediakeyboard.data.ResolverRegistry
 import org.daylight.mediakeyboard.data.dto.MediaEntity
+import kotlin.coroutines.resume
 
 class MainActivity : AppCompatActivity() {
 
     private lateinit var repository: MediaRepository
     private lateinit var adapter: MediaAdapter
+    private lateinit var exporter: LibraryExporter
     private val savedEntries = mutableListOf<MediaEntry>()
     private val categoryCheckBoxes = mutableListOf<Pair<Long, CheckBox>>()
     private var dbObserver: InvalidationTracker.Observer? = null
+
+    private var pendingExportCategories = setOf<Long>()
+
+    private val exportLauncher = registerForActivityResult(
+        ActivityResultContracts.CreateDocument("application/zip")
+    ) { uri ->
+        if (uri != null) {
+            lifecycleScope.launch {
+                try {
+                    contentResolver.openOutputStream(uri)?.use { out ->
+                        exporter.exportLibrary(pendingExportCategories, out)
+                    }
+                    Toast.makeText(this@MainActivity, "Экспорт успешно завершен!", Toast.LENGTH_SHORT).show()
+                } catch (e: Exception) {
+                    Log.e("MainActivity", "Export failed", e)
+                    Toast.makeText(this@MainActivity, "Ошибка при экспорте", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+    private val importLauncher = registerForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            lifecycleScope.launch {
+                try {
+                    val inputStream = contentResolver.openInputStream(uri)
+                    if (inputStream != null) {
+                        val success = exporter.importLibrary(
+                            inputStream = inputStream,
+                            onCategoryConflict = { catName ->
+                                suspendCancellableCoroutine { cont ->
+                                    AlertDialog.Builder(this@MainActivity)
+                                        .setTitle("Категория уже существует")
+                                        .setMessage("Категория '$catName' уже есть в медиатеке. Выберите действие:")
+                                        .setPositiveButton("Объединить") { _, _ ->
+                                            if (cont.isActive) cont.resume(LibraryExporter.ConflictAction.MERGE)
+                                        }
+                                        .setNegativeButton("Создать как '$catName (1)'") { _, _ ->
+                                            if (cont.isActive) cont.resume(LibraryExporter.ConflictAction.CREATE_DUPLICATE)
+                                        }
+                                        .setCancelable(false)
+                                        .show()
+                                }
+                            }
+                        )
+                        if (success) {
+                            Toast.makeText(this@MainActivity, "Импорт успешно завершен!", Toast.LENGTH_SHORT).show()
+                            refreshAllData()
+                        } else {
+                            Toast.makeText(this@MainActivity, "Ошибка при импорте файла", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.e("MainActivity", "Import failed", e)
+                    Toast.makeText(this@MainActivity, "Ошибка обработки файла импорта", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -49,8 +120,11 @@ class MainActivity : AppCompatActivity() {
             apiKeyStore = ApiKeyStore.get(this),
             localCacher = localCacher
         )
+        exporter = LibraryExporter(this)
 
         initStatusSection()
+        initKeyboardSettingsSection()
+        initBackupSection()
         initMediaGrid()
         initAddMediaSection()
         initCategoryManagementSection()
@@ -90,6 +164,104 @@ class MainActivity : AppCompatActivity() {
         }
 
         updateStatus(statusText)
+    }
+
+    private fun initKeyboardSettingsSection() {
+        val spinnerColumns = findViewById<Spinner>(R.id.spinnerColumns)
+        val options = arrayOf(
+            "Авто (по ширине экрана)",
+            "2 колонки",
+            "3 колонки",
+            "4 колонки",
+            "5 колонок"
+        )
+        val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, options)
+        spinnerColumns.adapter = adapter
+
+        val prefs = getSharedPreferences("media_keyboard_prefs", MODE_PRIVATE)
+        val currentColumns = prefs.getInt("pref_keyboard_columns", 0)
+        val selectedIndex = when (currentColumns) {
+            2 -> 1
+            3 -> 2
+            4 -> 3
+            5 -> 4
+            else -> 0
+        }
+        spinnerColumns.setSelection(selectedIndex)
+
+        spinnerColumns.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                val targetColumns = when (position) {
+                    1 -> 2
+                    2 -> 3
+                    3 -> 4
+                    4 -> 5
+                    else -> 0
+                }
+                prefs.edit().putInt("pref_keyboard_columns", targetColumns).apply()
+            }
+
+            override fun onNothingSelected(parent: AdapterView<*>?) {}
+        }
+    }
+
+    private fun initBackupSection() {
+        val btnExport = findViewById<Button>(R.id.btnExportLibrary)
+        val btnImport = findViewById<Button>(R.id.btnImportLibrary)
+
+        btnExport.setOnClickListener {
+            showExportCategoryPickerDialog()
+        }
+
+        btnImport.setOnClickListener {
+            importLauncher.launch(arrayOf("application/zip", "application/x-zip-compressed", "application/octet-stream", "*/*"))
+        }
+    }
+
+    private fun showExportCategoryPickerDialog() {
+        lifecycleScope.launch {
+            val categories = repository.getAllCategories()
+            val container = LinearLayout(this@MainActivity).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(40, 20, 40, 20)
+            }
+
+            val cbAll = CheckBox(this@MainActivity).apply {
+                text = "Все категории и медиа"
+                isChecked = true
+            }
+            container.addView(cbAll)
+
+            val checkBoxes = mutableListOf<Pair<Long, CheckBox>>()
+            categories.forEach { cat ->
+                val cb = CheckBox(this@MainActivity).apply {
+                    text = cat.name
+                    isChecked = true
+                    isEnabled = false
+                }
+                container.addView(cb)
+                checkBoxes.add(cat.id to cb)
+            }
+
+            cbAll.setOnCheckedChangeListener { _, isChecked ->
+                checkBoxes.forEach { it.second.isEnabled = !isChecked }
+            }
+
+            AlertDialog.Builder(this@MainActivity)
+                .setTitle("Экспорт библиотеки")
+                .setMessage("Выберите категории для включения в файл экспорта:")
+                .setView(container)
+                .setPositiveButton("Экспортировать") { _, _ ->
+                    pendingExportCategories = if (cbAll.isChecked) {
+                        emptySet()
+                    } else {
+                        checkBoxes.filter { it.second.isChecked }.map { it.first }.toSet()
+                    }
+                    exportLauncher.launch("mediakeyboard_export.zip")
+                }
+                .setNegativeButton("Отмена", null)
+                .show()
+        }
     }
 
     private fun initMediaGrid() {
