@@ -125,6 +125,7 @@ class MediaKeyboardService : InputMethodService() {
     }
 
     private fun refreshCategoriesAndMedia() {
+        if (!::adapter.isInitialized) return
         scope.launch {
             loadCategoryTabs()
             loadMediaForSelectedCategory()
@@ -223,14 +224,18 @@ class MediaKeyboardService : InputMethodService() {
                 )
             )
         }
-        adapter.notifyDataSetChanged()
+        if (::adapter.isInitialized) {
+            adapter.notifyDataSetChanged()
+        }
 
         entries.forEachIndexed { index, entry ->
             if (entry.resolution == null) {
                 scope.launch {
                     val res = repository.resolve(entry.sourceUrl)
                     entries[index] = entry.copy(resolution = res)
-                    adapter.notifyItemChanged(index)
+                    if (::adapter.isInitialized) {
+                        adapter.notifyItemChanged(index)
+                    }
                 }
             }
         }

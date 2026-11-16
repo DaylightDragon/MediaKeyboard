@@ -1,9 +1,11 @@
 package org.daylight.mediakeyboard.data
 
+import android.content.Context
 import android.util.Log
 import org.daylight.mediakeyboard.data.dto.CategoryEntity
 import org.daylight.mediakeyboard.data.dto.MediaDao
 import org.daylight.mediakeyboard.data.dto.MediaEntity
+import java.io.File
 
 class MediaRepository(
     private val dao: MediaDao,
@@ -24,13 +26,25 @@ class MediaRepository(
                     return MediaResolution.Failed(cached.serviceId ?: "unknown", cached.failReason)
                 }
 
-                var displayPreviewUrl = cached.localPreviewPath ?: cached.previewUrl
-                if (cached.localPreviewPath == null && localCacher?.shouldCacheLocally(cached.previewUrl) == true) {
+                var displayPreviewUrl = cached.previewUrl
+                if (!cached.localPreviewPath.isNullOrEmpty()) {
+                    val path = cached.localPreviewPath.removePrefix("file://")
+                    val file = File(path)
+                    if (file.exists() && file.length() > 100) {
+                        displayPreviewUrl = cached.localPreviewPath
+                    } else {
+                        dao.upsert(cached.copy(localPreviewPath = null))
+                    }
+                } else if (localCacher?.shouldCacheLocally(cached.previewUrl) == true) {
                     val downloadedPath = localCacher.cachePreview(cached.previewUrl)
                     if (downloadedPath != null) {
                         displayPreviewUrl = downloadedPath
                         dao.upsert(cached.copy(localPreviewPath = downloadedPath))
                     }
+                }
+
+                if (displayPreviewUrl.isBlank()) {
+                    displayPreviewUrl = cached.contentUrl.ifBlank { sourceUrl }
                 }
 
                 return MediaResolution.Ready(
@@ -153,12 +167,33 @@ class MediaRepository(
 
     suspend fun addCategory(name: String): Long {
         val trimmed = name.trim()
-        if (trimmed.isEmpty()) return -1
+        if (trimmed.isEmpty()) return -1L
         return dao.insertCategory(CategoryEntity(name = trimmed))
     }
 
-    suspend fun deleteCategory(categoryId: Long) {
+    suspend fun deleteCategory(categoryId: Long, deleteAttachedMedia: Boolean = false) {
+        if (deleteAttachedMedia) {
+            val items = dao.getMediaForCategory(categoryId)
+            items.forEach { media ->
+                if (!media.localPreviewPath.isNullOrEmpty()) {
+                    val file = File(media.localPreviewPath.removePrefix("file://"))
+                    if (file.exists()) file.delete()
+                }
+                dao.delete(media.sourceUrl)
+            }
+        }
         dao.deleteCategory(categoryId)
+    }
+
+    suspend fun clearAllMedia(context: Context) {
+        dao.deleteAllCrossRefs()
+        dao.deleteAllCategories()
+        dao.deleteAllMedia()
+
+        val previewsDir = File(context.filesDir, "previews")
+        if (previewsDir.exists()) {
+            previewsDir.listFiles()?.forEach { it.delete() }
+        }
     }
 
     suspend fun getMediaForCategory(categoryId: Long): List<MediaEntity> =

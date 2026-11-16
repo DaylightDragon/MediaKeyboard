@@ -27,6 +27,7 @@ import androidx.room.InvalidationTracker
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
 import org.daylight.mediakeyboard.data.ApiKeyStore
 import org.daylight.mediakeyboard.data.AppDatabase
 import org.daylight.mediakeyboard.data.LibraryExporter
@@ -34,6 +35,7 @@ import org.daylight.mediakeyboard.data.LocalMediaCacher
 import org.daylight.mediakeyboard.data.MediaRepository
 import org.daylight.mediakeyboard.data.MediaResolution
 import org.daylight.mediakeyboard.data.ResolverRegistry
+import org.daylight.mediakeyboard.data.dto.CategoryEntity
 import org.daylight.mediakeyboard.data.dto.MediaEntity
 import kotlin.coroutines.resume
 
@@ -74,34 +76,40 @@ class MainActivity : AppCompatActivity() {
                 try {
                     val inputStream = contentResolver.openInputStream(uri)
                     if (inputStream != null) {
-                        val success = exporter.importLibrary(
+                        val result = exporter.importLibrary(
                             inputStream = inputStream,
                             onCategoryConflict = { catName ->
-                                suspendCancellableCoroutine { cont ->
-                                    AlertDialog.Builder(this@MainActivity)
-                                        .setTitle("Категория уже существует")
-                                        .setMessage("Категория '$catName' уже есть в медиатеке. Выберите действие:")
-                                        .setPositiveButton("Объединить") { _, _ ->
-                                            if (cont.isActive) cont.resume(LibraryExporter.ConflictAction.MERGE)
-                                        }
-                                        .setNegativeButton("Создать как '$catName (1)'") { _, _ ->
-                                            if (cont.isActive) cont.resume(LibraryExporter.ConflictAction.CREATE_DUPLICATE)
-                                        }
-                                        .setCancelable(false)
-                                        .show()
+                                withContext(Dispatchers.Main) {
+                                    suspendCancellableCoroutine { cont ->
+                                        AlertDialog.Builder(this@MainActivity)
+                                            .setTitle("Категория уже существует")
+                                            .setMessage("Категория '$catName' уже есть в медиатеке. Выберите действие:")
+                                            .setPositiveButton("Объединить") { _, _ ->
+                                                if (cont.isActive) cont.resume(LibraryExporter.ConflictAction.MERGE)
+                                            }
+                                            .setNegativeButton("Создать как '$catName (1)'") { _, _ ->
+                                                if (cont.isActive) cont.resume(LibraryExporter.ConflictAction.CREATE_DUPLICATE)
+                                            }
+                                            .setCancelable(false)
+                                            .show()
+                                    }
                                 }
                             }
                         )
-                        if (success) {
-                            Toast.makeText(this@MainActivity, "Импорт успешно завершен!", Toast.LENGTH_SHORT).show()
-                            refreshAllData()
-                        } else {
-                            Toast.makeText(this@MainActivity, "Ошибка при импорте файла", Toast.LENGTH_SHORT).show()
-                        }
+                        result.fold(
+                            onSuccess = {
+                                Toast.makeText(this@MainActivity, "Импорт успешно завершен!", Toast.LENGTH_SHORT).show()
+                                refreshAllData()
+                            },
+                            onFailure = { error ->
+                                Log.e("MainActivity", "Import error", error)
+                                Toast.makeText(this@MainActivity, "Ошибка импорта: ${error.message}", Toast.LENGTH_LONG).show()
+                            }
+                        )
                     }
                 } catch (e: Exception) {
                     Log.e("MainActivity", "Import failed", e)
-                    Toast.makeText(this@MainActivity, "Ошибка обработки файла импорта", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this@MainActivity, "Ошибка обработки файла: ${e.message}", Toast.LENGTH_LONG).show()
                 }
             }
         }
@@ -175,7 +183,8 @@ class MainActivity : AppCompatActivity() {
             "4 колонки",
             "5 колонок"
         )
-        val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, options)
+        val adapter = ArrayAdapter(this, R.layout.spinner_item, options)
+        adapter.setDropDownViewResource(R.layout.spinner_dropdown_item)
         spinnerColumns.adapter = adapter
 
         val prefs = getSharedPreferences("media_keyboard_prefs", MODE_PRIVATE)
@@ -266,6 +275,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun initMediaGrid() {
         val grid = findViewById<RecyclerView>(R.id.mainMediaGrid)
+        val btnClearAll = findViewById<Button>(R.id.btnClearAllMedia)
         val dm = resources.displayMetrics
         val columns = maxOf(2, dm.widthPixels / (120 * dm.density).toInt())
         val columnWidth = dm.widthPixels / columns
@@ -288,6 +298,21 @@ class MainActivity : AppCompatActivity() {
             }
         )
         grid.adapter = adapter
+
+        btnClearAll.setOnClickListener {
+            AlertDialog.Builder(this)
+                .setTitle("Очистка всей медиатеки")
+                .setMessage("Вы абсолютно уверены, что хотите НАВСЕГДА удалить все категории, гифки и локальные файлы превью? Это действие нельзя отменить.")
+                .setPositiveButton("Да, очистить всё") { _, _ ->
+                    lifecycleScope.launch {
+                        repository.clearAllMedia(this@MainActivity)
+                        refreshAllData()
+                        Toast.makeText(this@MainActivity, "Медиатека успешно очищена", Toast.LENGTH_SHORT).show()
+                    }
+                }
+                .setNegativeButton("Отмена", null)
+                .show()
+        }
     }
 
     private fun showMainItemOptionsDialog(entry: MediaEntry) {
@@ -453,10 +478,7 @@ class MainActivity : AppCompatActivity() {
                 text = "Удалить"
                 textSize = 11f
                 setOnClickListener {
-                    lifecycleScope.launch {
-                        repository.deleteCategory(cat.id)
-                        refreshAllData()
-                    }
+                    showCategoryDeleteConfirmDialog(cat)
                 }
             }
 
@@ -464,6 +486,26 @@ class MainActivity : AppCompatActivity() {
             row.addView(btnDelete)
             container.addView(row)
         }
+    }
+
+    private fun showCategoryDeleteConfirmDialog(category: CategoryEntity) {
+        AlertDialog.Builder(this)
+            .setTitle("Удаление категории '${category.name}'")
+            .setMessage("Выберите способ удаления категории:")
+            .setPositiveButton("Категорию и все её гифки") { _, _ ->
+                lifecycleScope.launch {
+                    repository.deleteCategory(category.id, deleteAttachedMedia = true)
+                    refreshAllData()
+                }
+            }
+            .setNeutralButton("Только категорию") { _, _ ->
+                lifecycleScope.launch {
+                    repository.deleteCategory(category.id, deleteAttachedMedia = false)
+                    refreshAllData()
+                }
+            }
+            .setNegativeButton("Отмена", null)
+            .show()
     }
 
     private suspend fun loadSavedMediaList() {

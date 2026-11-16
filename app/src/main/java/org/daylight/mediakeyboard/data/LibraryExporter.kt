@@ -5,10 +5,10 @@ import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.daylight.mediakeyboard.data.dto.CategoryEntity
-import org.daylight.mediakeyboard.data.dto.MediaCategoryCrossRef
 import org.daylight.mediakeyboard.data.dto.MediaEntity
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
@@ -119,7 +119,6 @@ class LibraryExporter(private val context: Context) {
         zipOut.closeEntry()
 
         // 2. Упаковываем локальные файлы превью
-        val previewsDir = File(context.filesDir, "previews")
         previewFilesToZip.distinctBy { it.first }.forEach { (fileName, file) ->
             if (file.exists()) {
                 val entry = ZipEntry("previews/$fileName")
@@ -141,7 +140,7 @@ class LibraryExporter(private val context: Context) {
     suspend fun importLibrary(
         inputStream: InputStream,
         onCategoryConflict: suspend (categoryName: String) -> ConflictAction
-    ) = withContext(Dispatchers.IO) {
+    ): Result<Unit> = withContext(Dispatchers.IO) {
         val db = AppDatabase.get(context)
         val dao = db.mediaDao()
         val previewsDir = File(context.filesDir, "previews").apply { if (!exists()) mkdirs() }
@@ -155,11 +154,14 @@ class LibraryExporter(private val context: Context) {
             val zipIn = ZipInputStream(inputStream)
             var entry: ZipEntry? = zipIn.nextEntry
             while (entry != null) {
+                val normalizedName = entry.name.replace('\\', '/')
                 if (!entry.isDirectory) {
-                    if (entry.name == "manifest.json") {
-                        manifestText = zipIn.bufferedReader(Charsets.UTF_8).readText()
-                    } else if (entry.name.startsWith("previews/")) {
-                        val fileName = entry.name.removePrefix("previews/")
+                    if (normalizedName.endsWith("manifest.json")) {
+                        val baos = ByteArrayOutputStream()
+                        zipIn.copyTo(baos)
+                        manifestText = baos.toString("UTF-8")
+                    } else if (normalizedName.contains("previews/")) {
+                        val fileName = normalizedName.substringAfter("previews/")
                         if (fileName.isNotEmpty()) {
                             val tempFile = File(tempDir, fileName)
                             FileOutputStream(tempFile).use { out ->
@@ -174,8 +176,9 @@ class LibraryExporter(private val context: Context) {
             }
 
             if (manifestText.isNullOrEmpty()) {
-                Log.e("LibraryExporter", "Import failed: manifest.json not found in archive")
-                return@withContext false
+                val errorMsg = "Манифест manifest.json не найден в архиве"
+                Log.e("LibraryExporter", errorMsg)
+                return@withContext Result.failure(Exception(errorMsg))
             }
 
             val manifestObj = JSONObject(manifestText)
@@ -184,19 +187,19 @@ class LibraryExporter(private val context: Context) {
 
             // 1. Импортируем категории с обработкой дубликатов
             val categoryNameToIdMap = mutableMapOf<String, Long>()
-            val existingCategories = dao.getAllCategories().associateBy { it.name }
 
             for (i in 0 until categoriesArr.length()) {
                 val catName = categoriesArr.getJSONObject(i).getString("name")
-                if (existingCategories.containsKey(catName)) {
+                val existing = dao.getCategoryByName(catName)
+
+                if (existing != null) {
                     val action = onCategoryConflict(catName)
                     if (action == ConflictAction.MERGE) {
-                        categoryNameToIdMap[catName] = existingCategories[catName]!!.id
+                        categoryNameToIdMap[catName] = existing.id
                     } else {
-                        // Создать новую категорию с именем (1), (2)...
-                        var newName = "$catName (1)"
                         var counter = 1
-                        while (dao.getAllCategories().any { it.name == newName }) {
+                        var newName = "$catName ($counter)"
+                        while (dao.getCategoryByName(newName) != null) {
                             counter++
                             newName = "$catName ($counter)"
                         }
@@ -262,10 +265,10 @@ class LibraryExporter(private val context: Context) {
             }
 
             Log.d("LibraryExporter", "Import successful. Imported ${mediaArr.length()} media items.")
-            return@withContext true
+            return@withContext Result.success(Unit)
         } catch (e: Exception) {
             Log.e("LibraryExporter", "Failed to import library", e)
-            return@withContext false
+            return@withContext Result.failure(e)
         } finally {
             tempDir.deleteRecursively()
         }

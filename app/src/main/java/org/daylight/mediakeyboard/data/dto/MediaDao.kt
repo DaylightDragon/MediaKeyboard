@@ -20,6 +20,9 @@ interface MediaDao {
     @Query("DELETE FROM media_cache WHERE sourceUrl = :url")
     suspend fun delete(url: String)
 
+    @Query("DELETE FROM media_cache")
+    suspend fun deleteAllMedia()
+
     // Избранное
     @Query("SELECT * FROM media_cache WHERE isFavorite = 1 AND failed = 0 ORDER BY resolvedAt DESC")
     suspend fun getFavorites(): List<MediaEntity>
@@ -31,11 +34,17 @@ interface MediaDao {
     @Query("SELECT * FROM categories ORDER BY sortOrder ASC, name ASC")
     suspend fun getAllCategories(): List<CategoryEntity>
 
-    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    @Query("SELECT * FROM categories WHERE name = :name LIMIT 1")
+    suspend fun getCategoryByName(name: String): CategoryEntity?
+
+    @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insertCategory(category: CategoryEntity): Long
 
     @Query("DELETE FROM categories WHERE id = :categoryId")
     suspend fun deleteCategory(categoryId: Long)
+
+    @Query("DELETE FROM categories")
+    suspend fun deleteAllCategories()
 
     // Связи Медиа <-> Категории
     @Insert(onConflict = OnConflictStrategy.REPLACE)
@@ -46,6 +55,12 @@ interface MediaDao {
 
     @Query("DELETE FROM media_category_cross_ref WHERE mediaSourceUrl = :url")
     suspend fun deleteAllCrossRefsForMedia(url: String)
+
+    @Query("DELETE FROM media_category_cross_ref WHERE categoryId = :categoryId")
+    suspend fun deleteAllCrossRefsForCategory(categoryId: Long)
+
+    @Query("DELETE FROM media_category_cross_ref")
+    suspend fun deleteAllCrossRefs()
 
     @Query("SELECT categoryId FROM media_category_cross_ref WHERE mediaSourceUrl = :url")
     suspend fun getCategoryIdsForMedia(url: String): List<Long>
