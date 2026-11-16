@@ -24,6 +24,7 @@ import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.RecyclerView
 import androidx.recyclerview.widget.StaggeredGridLayoutManager
 import androidx.room.InvalidationTracker
+import com.google.android.material.switchmaterial.SwitchMaterial
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -211,6 +212,14 @@ class MainActivity : AppCompatActivity() {
             }
 
             override fun onNothingSelected(parent: AdapterView<*>?) {}
+        }
+
+        val switchAutoSend = findViewById<SwitchMaterial>(R.id.switchAutoSend)
+        val autoSend = prefs.getBoolean("pref_auto_send", true)
+        switchAutoSend.isChecked = autoSend
+
+        switchAutoSend.setOnCheckedChangeListener { _, isChecked ->
+            prefs.edit().putBoolean("pref_auto_send", isChecked).apply()
         }
     }
 

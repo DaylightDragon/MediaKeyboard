@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.inputmethodservice.InputMethodService
 import android.util.Log
+import android.view.KeyEvent
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -445,7 +446,7 @@ class MediaKeyboardService : InputMethodService() {
     private fun onTileClick(entry: MediaEntry) {
         val res = entry.resolution
         if (res is MediaResolution.Ready) {
-            insertText(res.sourceUrl)
+            insertTextAndSend(res.sourceUrl)
             Log.d(TAG, "Content URL: " + res.contentUrl)
         }
     }
@@ -467,8 +468,21 @@ class MediaKeyboardService : InputMethodService() {
         refreshCategoriesAndMedia()
     }
 
-    private fun insertText(text: String) {
+    private fun insertTextAndSend(text: String) {
         val ic = currentInputConnection ?: return
         ic.commitText(text, 1)
+
+        val prefs = getSharedPreferences("media_keyboard_prefs", MODE_PRIVATE)
+        val autoSend = prefs.getBoolean("pref_auto_send", true)
+
+        if (autoSend) {
+            val editorInfo = currentInputEditorInfo
+            val action = editorInfo?.imeOptions?.and(EditorInfo.IME_MASK_ACTION)
+            if (action != null && action != EditorInfo.IME_ACTION_NONE && action != EditorInfo.IME_ACTION_UNSPECIFIED) {
+                ic.performEditorAction(action)
+            } else {
+                sendDownUpKeyEvents(KeyEvent.KEYCODE_ENTER)
+            }
+        }
     }
 }
