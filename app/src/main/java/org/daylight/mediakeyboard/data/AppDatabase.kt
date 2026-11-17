@@ -15,7 +15,7 @@ import org.daylight.mediakeyboard.data.dto.MediaEntity
         CategoryEntity::class,
         MediaCategoryCrossRef::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {

@@ -16,6 +16,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.recyclerview.widget.ItemTouchHelper
 import androidx.recyclerview.widget.RecyclerView
 import androidx.recyclerview.widget.StaggeredGridLayoutManager
 import androidx.room.InvalidationTracker
@@ -32,6 +33,7 @@ import org.daylight.mediakeyboard.data.MediaResolution
 import org.daylight.mediakeyboard.data.ResolverRegistry
 import org.daylight.mediakeyboard.data.dto.CategoryEntity
 import org.daylight.mediakeyboard.data.dto.MediaEntity
+import java.util.Collections
 
 class MediaKeyboardService : InputMethodService() {
     companion object {
@@ -44,12 +46,12 @@ class MediaKeyboardService : InputMethodService() {
     private lateinit var repository: MediaRepository
     private lateinit var adapter: MediaAdapter
     private val entries = mutableListOf<MediaEntry>()
+    private var currentMediaList: List<MediaEntity> = emptyList()
 
     private var groupsContainer: LinearLayout? = null
     private var panelOverlay: ViewGroup? = null
     private var selectedCategoryId: Long = FILTER_ALL
     private var columnWidth: Int = 200
-
     private var dbObserver: InvalidationTracker.Observer? = null
 
     override fun onCreate() {
@@ -68,7 +70,7 @@ class MediaKeyboardService : InputMethodService() {
             arrayOf("media_cache", "categories", "media_category_cross_ref")
         ) {
             override fun onInvalidated(tables: Set<String>) {
-                scope.launch {
+                scope.launch(Dispatchers.Main.immediate) {
                     refreshCategoriesAndMedia()
                 }
             }
@@ -89,23 +91,69 @@ class MediaKeyboardService : InputMethodService() {
             insets
         }
 
+        val prefs = getSharedPreferences("media_keyboard_prefs", MODE_PRIVATE)
+        val userColumns = prefs.getInt("pref_keyboard_columns", 0)
+
         val dm = resources.displayMetrics
-        Log.d(TAG, "displayMetrics.widthPixels=${dm.widthPixels}, density=${dm.density}")
-        val targetPx = (100 * dm.density).toInt()
-        val columns = maxOf(2, dm.widthPixels / targetPx)
+        val columns = if (userColumns in 2..6) {
+            userColumns
+        } else {
+            val targetPx = (100 * dm.density).toInt()
+            maxOf(2, dm.widthPixels / targetPx)
+        }
         columnWidth = dm.widthPixels / columns
 
         val lm = StaggeredGridLayoutManager(columns, StaggeredGridLayoutManager.VERTICAL)
         lm.gapStrategy = StaggeredGridLayoutManager.GAP_HANDLING_NONE
         grid.layoutManager = lm
 
+        lateinit var itemTouchHelper: ItemTouchHelper
+
         adapter = MediaAdapter(
             items = entries,
             onClick = { entry -> onTileClick(entry) },
             columnWidth = columnWidth,
-            onLongClick = { entry -> showItemOptionsDialog(entry) }
+            onLongClick = { entry -> showItemOptionsDialog(entry) },
+            onStartDrag = { viewHolder -> itemTouchHelper.startDrag(viewHolder) }
         )
         grid.adapter = adapter
+
+        itemTouchHelper = ItemTouchHelper(object : ItemTouchHelper.SimpleCallback(
+            ItemTouchHelper.UP or
+                    ItemTouchHelper.DOWN or
+                    ItemTouchHelper.LEFT or
+                    ItemTouchHelper.RIGHT,
+            0
+        ) {
+            override fun onMove(
+                recyclerView: RecyclerView,
+                viewHolder: RecyclerView.ViewHolder,
+                target: RecyclerView.ViewHolder
+            ): Boolean {
+                val fromPos = viewHolder.adapterPosition
+                val toPos = target.adapterPosition
+                if (fromPos == RecyclerView.NO_POSITION || toPos == RecyclerView.NO_POSITION) return false
+
+                Collections.swap(entries, fromPos, toPos)
+                adapter.notifyItemMoved(fromPos, toPos)
+                return true
+            }
+
+            override fun onSwiped(viewHolder: RecyclerView.ViewHolder, direction: Int) {}
+
+            override fun clearView(recyclerView: RecyclerView, viewHolder: RecyclerView.ViewHolder) {
+                super.clearView(recyclerView, viewHolder)
+                scope.launch {
+                    val updatedEntities = entries.mapNotNull { entry ->
+                        currentMediaList.find { it.sourceUrl == entry.sourceUrl }
+                    }
+                    if (updatedEntities.isNotEmpty()) {
+                        repository.saveListOrder(updatedEntities)
+                    }
+                }
+            }
+        })
+        itemTouchHelper.attachToRecyclerView(grid)
 
         refreshCategoriesAndMedia()
 
@@ -196,7 +244,6 @@ class MediaKeyboardService : InputMethodService() {
             else -> repository.getMediaForCategory(selectedCategoryId)
         }
 
-        // Демо ссылки добавляем только один раз при самом первом запуске
         if (!isDemoSeeded && mediaList.isEmpty()) {
             demoUrls.forEach { url ->
                 repository.resolve(url)
@@ -204,6 +251,8 @@ class MediaKeyboardService : InputMethodService() {
             prefs.edit().putBoolean("demo_seeded", true).apply()
             mediaList = repository.getAllSaved()
         }
+
+        currentMediaList = mediaList
 
         entries.clear()
         mediaList.forEach { entity ->
@@ -219,12 +268,14 @@ class MediaKeyboardService : InputMethodService() {
                             contentUrl = entity.contentUrl,
                             aspectRatio = entity.aspectRatio,
                             title = entity.title,
-                            isFavorite = entity.isFavorite
+                            isFavorite = entity.isFavorite,
+                            isPinned = entity.isPinned
                         )
                     }
                 )
             )
         }
+
         if (::adapter.isInitialized) {
             adapter.notifyDataSetChanged()
         }
@@ -324,10 +375,9 @@ class MediaKeyboardService : InputMethodService() {
                         text = "Удалить"
                         textSize = 11f
                         setOnClickListener {
-                            scope.launch {
-                                repository.deleteCategory(cat.id)
+                            showCategoryDeleteConfirmPanel(cat) {
                                 reloadCategoriesList()
-                                loadCategoryTabs()
+                                scope.launch { loadCategoryTabs() }
                             }
                         }
                     }
@@ -360,20 +410,92 @@ class MediaKeyboardService : InputMethodService() {
         showOverlay(dialogView)
     }
 
+    private fun showCategoryDeleteConfirmPanel(category: CategoryEntity, onDone: () -> Unit) {
+        val dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_entry_options, null)
+        val titleText = dialogView.findViewById<TextView>(R.id.titleText)
+        val btnDeleteAll = dialogView.findViewById<Button>(R.id.btnToggleFavorite)
+        val btnDeleteCatOnly = dialogView.findViewById<Button>(R.id.btnEditCategories)
+        val btnDeleteMedia = dialogView.findViewById<Button>(R.id.btnDeleteMedia)
+        val btnCancel = dialogView.findViewById<Button>(R.id.btnCancelOptions)
+        val btnPinned = dialogView.findViewById<Button>(R.id.btnTogglePinned)
+        val btnMoveUp = dialogView.findViewById<Button>(R.id.btnMoveUp)
+        val btnMoveDown = dialogView.findViewById<Button>(R.id.btnMoveDown)
+
+        btnPinned.visibility = View.GONE
+        btnMoveUp.visibility = View.GONE
+        btnMoveDown.visibility = View.GONE
+
+        titleText.text = "Удалить категорию '${category.name}'?"
+        btnDeleteAll.text = "Категорию и её гифки"
+        btnDeleteCatOnly.text = "Только категорию"
+        btnDeleteMedia.visibility = View.GONE
+
+        btnCancel.setOnClickListener { hideOverlay() }
+
+        btnDeleteAll.setOnClickListener {
+            scope.launch {
+                repository.deleteCategory(category.id, deleteAttachedMedia = true)
+                hideOverlay()
+                onDone()
+            }
+        }
+
+        btnDeleteCatOnly.setOnClickListener {
+            scope.launch {
+                repository.deleteCategory(category.id, deleteAttachedMedia = false)
+                hideOverlay()
+                onDone()
+            }
+        }
+
+        showOverlay(dialogView)
+    }
+
     // --- Панель Опций Элемента (Long Click) ---
 
     private fun showItemOptionsDialog(entry: MediaEntry) {
         val dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_entry_options, null)
         val titleText = dialogView.findViewById<TextView>(R.id.titleText)
+        val btnTogglePinned = dialogView.findViewById<Button>(R.id.btnTogglePinned)
+        val btnMoveUp = dialogView.findViewById<Button>(R.id.btnMoveUp)
+        val btnMoveDown = dialogView.findViewById<Button>(R.id.btnMoveDown)
         val btnToggleFav = dialogView.findViewById<Button>(R.id.btnToggleFavorite)
         val btnEditCat = dialogView.findViewById<Button>(R.id.btnEditCategories)
         val btnDelete = dialogView.findViewById<Button>(R.id.btnDeleteMedia)
         val btnCancel = dialogView.findViewById<Button>(R.id.btnCancelOptions)
 
-        val title = (entry.resolution as? MediaResolution.Ready)?.title ?: entry.sourceUrl
+        val readyRes = entry.resolution as? MediaResolution.Ready
+        val title = readyRes?.title ?: entry.sourceUrl
+        val isPinned = readyRes?.isPinned == true
+
         titleText.text = title
+        btnTogglePinned.text = if (isPinned) "Открепить" else "Закрепить вверху"
 
         btnCancel.setOnClickListener { hideOverlay() }
+
+        btnTogglePinned.setOnClickListener {
+            scope.launch {
+                repository.togglePinned(entry.sourceUrl)
+                hideOverlay()
+                refreshCategoriesAndMedia()
+            }
+        }
+
+        btnMoveUp.setOnClickListener {
+            scope.launch {
+                repository.moveMediaUp(entry.sourceUrl, currentMediaList)
+                hideOverlay()
+                refreshCategoriesAndMedia()
+            }
+        }
+
+        btnMoveDown.setOnClickListener {
+            scope.launch {
+                repository.moveMediaDown(entry.sourceUrl, currentMediaList)
+                hideOverlay()
+                refreshCategoriesAndMedia()
+            }
+        }
 
         btnToggleFav.setOnClickListener {
             scope.launch {

@@ -14,7 +14,7 @@ interface MediaDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(entity: MediaEntity)
 
-    @Query("SELECT * FROM media_cache WHERE failed = 0 ORDER BY resolvedAt DESC")
+    @Query("SELECT * FROM media_cache WHERE failed = 0 ORDER BY isPinned DESC, sortOrder DESC, resolvedAt DESC")
     suspend fun all(): List<MediaEntity>
 
     @Query("DELETE FROM media_cache WHERE sourceUrl = :url")
@@ -23,12 +23,25 @@ interface MediaDao {
     @Query("DELETE FROM media_cache")
     suspend fun deleteAllMedia()
 
-    // Избранное
-    @Query("SELECT * FROM media_cache WHERE isFavorite = 1 AND failed = 0 ORDER BY resolvedAt DESC")
+    // Избранное и закрепленное
+    @Query("SELECT * FROM media_cache WHERE isFavorite = 1 AND failed = 0 ORDER BY isPinned DESC, sortOrder DESC, resolvedAt DESC")
     suspend fun getFavorites(): List<MediaEntity>
 
     @Query("UPDATE media_cache SET isFavorite = :isFavorite WHERE sourceUrl = :url")
     suspend fun setFavorite(url: String, isFavorite: Boolean)
+
+    @Query("UPDATE media_cache SET isPinned = :isPinned WHERE sourceUrl = :url")
+    suspend fun setPinned(url: String, isPinned: Boolean)
+
+    @Query("UPDATE media_cache SET sortOrder = :sortOrder WHERE sourceUrl = :url")
+    suspend fun setSortOrder(url: String, sortOrder: Long)
+
+    @Transaction
+    suspend fun updateMediaOrders(orders: List<Pair<String, Long>>) {
+        orders.forEach { (url, order) ->
+            setSortOrder(url, order)
+        }
+    }
 
     // Категории
     @Query("SELECT * FROM categories ORDER BY sortOrder ASC, name ASC")
@@ -69,7 +82,7 @@ interface MediaDao {
         SELECT m.* FROM media_cache m
         INNER JOIN media_category_cross_ref ref ON m.sourceUrl = ref.mediaSourceUrl
         WHERE ref.categoryId = :categoryId AND m.failed = 0
-        ORDER BY m.resolvedAt DESC
+        ORDER BY m.isPinned DESC, m.sortOrder DESC, m.resolvedAt DESC
     """)
     suspend fun getMediaForCategory(categoryId: Long): List<MediaEntity>
 

@@ -21,7 +21,8 @@ class MediaAdapter(
     private val items: List<MediaEntry>,
     private val onClick: (MediaEntry) -> Unit,
     private val columnWidth: Int,
-    private val onLongClick: ((MediaEntry) -> Unit)? = null
+    private val onLongClick: ((MediaEntry) -> Unit)? = null,
+    private val onStartDrag: ((RecyclerView.ViewHolder) -> Unit)? = null
 ) : RecyclerView.Adapter<MediaAdapter.VH>() {
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH {
@@ -32,6 +33,7 @@ class MediaAdapter(
 
     class VH(v: View) : RecyclerView.ViewHolder(v) {
         val thumb: ImageView = v.findViewById(R.id.thumb)
+        val btnMenu: TextView = v.findViewById(R.id.btnMenu)
         val overlay: View = v.findViewById(R.id.overlay)
         val stateIcon: ImageView = v.findViewById(R.id.stateIcon)
         val overlayText: TextView = v.findViewById(R.id.overlayText)
@@ -110,8 +112,14 @@ class MediaAdapter(
         }
 
         holder.itemView.setOnClickListener { onClick(entry) }
+        holder.btnMenu.setOnClickListener { onLongClick?.invoke(entry) }
+
         holder.itemView.setOnLongClickListener {
-            onLongClick?.invoke(entry)
+            if (onStartDrag != null) {
+                onStartDrag.invoke(holder)
+            } else {
+                onLongClick?.invoke(entry)
+            }
             true
         }
     }

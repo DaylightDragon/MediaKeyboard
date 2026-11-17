@@ -14,6 +14,8 @@ data class MediaEntity(
     val title: String?,
     val resolvedAt: Long,
     val isFavorite: Boolean = false,        // флаг излюбленной гифки
+    val isPinned: Boolean = false,          // флаг закрепленной вверху гифки
+    val sortOrder: Long = 0L,               // пользовательский порядок сортировки
     val failed: Boolean = false,            // если API не сработал — не пытаться снова
     val failReason: String? = null
 )

@@ -12,6 +12,21 @@
         android:background="#FF333333"
         android:contentDescription="@null" />
 
+    <TextView
+        android:id="@+id/btnMenu"
+        android:layout_width="26dp"
+        android:layout_height="26dp"
+        android:layout_gravity="top|end"
+        android:layout_margin="3dp"
+        android:background="#A0000000"
+        android:text="⋮"
+        android:textColor="#FFFFFFFF"
+        android:textSize="15sp"
+        android:textStyle="bold"
+        android:gravity="center"
+        android:clickable="true"
+        android:focusable="true" />
+
     <LinearLayout
         android:id="@+id/overlay"
         android:layout_width="match_parent"

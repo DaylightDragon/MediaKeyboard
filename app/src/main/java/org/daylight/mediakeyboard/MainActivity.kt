@@ -21,6 +21,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
+import androidx.recyclerview.widget.ItemTouchHelper
 import androidx.recyclerview.widget.RecyclerView
 import androidx.recyclerview.widget.StaggeredGridLayoutManager
 import androidx.room.InvalidationTracker
@@ -38,6 +39,7 @@ import org.daylight.mediakeyboard.data.MediaResolution
 import org.daylight.mediakeyboard.data.ResolverRegistry
 import org.daylight.mediakeyboard.data.dto.CategoryEntity
 import org.daylight.mediakeyboard.data.dto.MediaEntity
+import java.util.Collections
 import kotlin.coroutines.resume
 
 class MainActivity : AppCompatActivity() {
@@ -293,6 +295,8 @@ class MainActivity : AppCompatActivity() {
         lm.gapStrategy = StaggeredGridLayoutManager.GAP_HANDLING_NONE
         grid.layoutManager = lm
 
+        lateinit var itemTouchHelper: ItemTouchHelper
+
         adapter = MediaAdapter(
             items = savedEntries,
             onClick = { entry ->
@@ -304,9 +308,48 @@ class MainActivity : AppCompatActivity() {
             columnWidth = columnWidth,
             onLongClick = { entry ->
                 showMainItemOptionsDialog(entry)
-            }
+            },
+            onStartDrag = { viewHolder -> itemTouchHelper.startDrag(viewHolder) }
         )
         grid.adapter = adapter
+
+        itemTouchHelper = ItemTouchHelper(object : ItemTouchHelper.SimpleCallback(
+            ItemTouchHelper.UP or
+                    ItemTouchHelper.DOWN or
+                    ItemTouchHelper.LEFT or
+                    ItemTouchHelper.RIGHT,
+            0
+        ) {
+            override fun onMove(
+                recyclerView: RecyclerView,
+                viewHolder: RecyclerView.ViewHolder,
+                target: RecyclerView.ViewHolder
+            ): Boolean {
+                val fromPos = viewHolder.adapterPosition
+                val toPos = target.adapterPosition
+                if (fromPos == RecyclerView.NO_POSITION || toPos == RecyclerView.NO_POSITION) return false
+
+                Collections.swap(savedEntries, fromPos, toPos)
+                adapter.notifyItemMoved(fromPos, toPos)
+                return true
+            }
+
+            override fun onSwiped(viewHolder: RecyclerView.ViewHolder, direction: Int) {}
+
+            override fun clearView(recyclerView: RecyclerView, viewHolder: RecyclerView.ViewHolder) {
+                super.clearView(recyclerView, viewHolder)
+                lifecycleScope.launch {
+                    val currentList = repository.getAllSaved()
+                    val updatedEntities = savedEntries.mapNotNull { entry ->
+                        currentList.find { it.sourceUrl == entry.sourceUrl }
+                    }
+                    if (updatedEntities.isNotEmpty()) {
+                        repository.saveListOrder(updatedEntities)
+                    }
+                }
+            }
+        })
+        itemTouchHelper.attachToRecyclerView(grid)
 
         btnClearAll.setOnClickListener {
             AlertDialog.Builder(this)
@@ -325,8 +368,14 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showMainItemOptionsDialog(entry: MediaEntry) {
-        val isFav = (entry.resolution as? MediaResolution.Ready)?.isFavorite == true
+        val readyRes = entry.resolution as? MediaResolution.Ready
+        val isFav = readyRes?.isFavorite == true
+        val isPinned = readyRes?.isPinned == true
+
         val options = arrayOf(
+            if (isPinned) "Открепить" else "Закрепить вверху",
+            "Сдвинуть выше",
+            "Сдвинуть ниже",
             if (isFav) "Убрать из избранного" else "В избранное",
             "Настроить категории",
             "Удалить"
@@ -338,12 +387,32 @@ class MainActivity : AppCompatActivity() {
                 when (which) {
                     0 -> {
                         lifecycleScope.launch {
+                            repository.togglePinned(entry.sourceUrl)
+                            refreshAllData()
+                        }
+                    }
+                    1 -> {
+                        lifecycleScope.launch {
+                            val currentList = repository.getAllSaved()
+                            repository.moveMediaUp(entry.sourceUrl, currentList)
+                            refreshAllData()
+                        }
+                    }
+                    2 -> {
+                        lifecycleScope.launch {
+                            val currentList = repository.getAllSaved()
+                            repository.moveMediaDown(entry.sourceUrl, currentList)
+                            refreshAllData()
+                        }
+                    }
+                    3 -> {
+                        lifecycleScope.launch {
                             repository.toggleFavorite(entry.sourceUrl)
                             refreshAllData()
                         }
                     }
-                    1 -> showMainEditCategoriesDialog(entry)
-                    2 -> {
+                    4 -> showMainEditCategoriesDialog(entry)
+                    5 -> {
                         lifecycleScope.launch {
                             repository.deleteMedia(entry.sourceUrl)
                             Toast.makeText(this@MainActivity, "Удалено из медиатеки", Toast.LENGTH_SHORT).show()

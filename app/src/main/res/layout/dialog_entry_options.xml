@@ -45,6 +45,44 @@
         </LinearLayout>
 
         <Button
+            android:id="@+id/btnTogglePinned"
+            style="?android:attr/borderlessButtonStyle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="start|center_vertical"
+            android:text="Закрепить вверху / Открепить"
+            android:textColor="#FFFFD54F"
+            android:textSize="13sp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/btnMoveUp"
+                style="?android:attr/borderlessButtonStyle"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:gravity="start|center_vertical"
+                android:text="Сдвинуть выше"
+                android:textColor="#FF81D4FA"
+                android:textSize="12sp" />
+
+            <Button
+                android:id="@+id/btnMoveDown"
+                style="?android:attr/borderlessButtonStyle"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:gravity="start|center_vertical"
+                android:text="Сдвинуть ниже"
+                android:textColor="#FF81D4FA"
+                android:textSize="12sp" />
+        </LinearLayout>
+
+        <Button
             android:id="@+id/btnToggleFavorite"
             style="?android:attr/borderlessButtonStyle"
             android:layout_width="match_parent"

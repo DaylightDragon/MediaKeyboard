@@ -53,7 +53,8 @@ class MediaRepository(
                     contentUrl = cached.contentUrl,
                     aspectRatio = cached.aspectRatio,
                     title = cached.title,
-                    isFavorite = cached.isFavorite
+                    isFavorite = cached.isFavorite,
+                    isPinned = cached.isPinned
                 )
             }
         }
@@ -85,7 +86,8 @@ class MediaRepository(
                 contentUrl = sourceUrl,
                 aspectRatio = 1f,
                 title = null,
-                isFavorite = false
+                isFavorite = false,
+                isPinned = false
             )
         }
 
@@ -121,7 +123,8 @@ class MediaRepository(
                 contentUrl = resolved.contentUrl,
                 aspectRatio = resolved.aspectRatio,
                 title = resolved.title,
-                isFavorite = false
+                isFavorite = false,
+                isPinned = false
             )
         } catch (e: MissingApiKeyException) {
             MediaResolution.MissingKey(resolver.serviceId, resolver.displayName)
@@ -144,7 +147,7 @@ class MediaRepository(
         }
     }
 
-    // --- Избранное и управление элементами ---
+    // --- Избранное, Закрепление и Перемещение элементов ---
 
     suspend fun getAllSaved(): List<MediaEntity> = dao.all()
 
@@ -155,6 +158,49 @@ class MediaRepository(
         val newFav = !cached.isFavorite
         dao.setFavorite(sourceUrl, newFav)
         return newFav
+    }
+
+    suspend fun togglePinned(sourceUrl: String): Boolean {
+        val cached = dao.get(sourceUrl) ?: return false
+        val newPinned = !cached.isPinned
+        dao.setPinned(sourceUrl, newPinned)
+        return newPinned
+    }
+
+    suspend fun moveMediaUp(sourceUrl: String, currentList: List<MediaEntity>) {
+        val index = currentList.indexOfFirst { it.sourceUrl == sourceUrl }
+        if (index > 0) {
+            val currentItem = currentList[index]
+            val prevItem = currentList[index - 1]
+
+            val currentOrder = if (currentItem.sortOrder != 0L) currentItem.sortOrder else currentItem.resolvedAt
+            val prevOrder = if (prevItem.sortOrder != 0L) prevItem.sortOrder else prevItem.resolvedAt
+
+            dao.setSortOrder(currentItem.sourceUrl, prevOrder + 1)
+            dao.setSortOrder(prevItem.sourceUrl, currentOrder)
+        }
+    }
+
+    suspend fun moveMediaDown(sourceUrl: String, currentList: List<MediaEntity>) {
+        val index = currentList.indexOfFirst { it.sourceUrl == sourceUrl }
+        if (index != -1 && index < currentList.size - 1) {
+            val currentItem = currentList[index]
+            val nextItem = currentList[index + 1]
+
+            val currentOrder = if (currentItem.sortOrder != 0L) currentItem.sortOrder else currentItem.resolvedAt
+            val nextOrder = if (nextItem.sortOrder != 0L) nextItem.sortOrder else nextItem.resolvedAt
+
+            dao.setSortOrder(currentItem.sourceUrl, nextOrder - 1)
+            dao.setSortOrder(nextItem.sourceUrl, currentOrder)
+        }
+    }
+
+    suspend fun saveListOrder(reorderedEntries: List<MediaEntity>) {
+        val total = reorderedEntries.size.toLong()
+        val orders = reorderedEntries.mapIndexed { index, entity ->
+            entity.sourceUrl to (total - index)
+        }
+        dao.updateMediaOrders(orders)
     }
 
     suspend fun deleteMedia(sourceUrl: String) {
@@ -214,7 +260,8 @@ sealed class MediaResolution {
         val contentUrl: String,
         val aspectRatio: Float,
         val title: String?,
-        val isFavorite: Boolean = false
+        val isFavorite: Boolean = false,
+        val isPinned: Boolean = false
     ) : MediaResolution()
 
     data class MissingKey(val serviceId: String, val displayName: String) : MediaResolution()
